@@ -1,0 +1,5 @@
+<resources>
+    <string name="app_name">딜레이더</string>
+    <string name="channel_name">발매·핫딜 알림</string>
+    <string name="load_failed">불러오지 못했습니다. 인터넷 연결을 확인한 뒤 앱을 다시 열어주세요.</string>
+</resources>

@@ -1,0 +1,31 @@
+{
+  "siteName": "딜레이더",
+  "releases": {
+    "daysAhead": 7,
+    "excludeCategories": ["경제", "정보"],
+    "excludeKeywords": ["휴장", "치킨", "유성우", "주식"]
+  },
+  "watchKeywords": [
+    "나이키", "NIKE", "조던", "덩크", "아디다스", "뉴발란스", "살로몬",
+    "슈프림", "팔라스", "스투시", "포켓몬", "레고", "한정판"
+  ],
+  "notify": {
+    "releases": "all",
+    "dealMinRecommend": 10,
+    "dealOnBest": true,
+    "quietHours": { "start": 0, "end": 8 },
+    "morningDigest": true,
+    "maxIndividualAlerts": 3
+  },
+  "shortcuts": {
+    "musinsa": [
+      { "label": "무신사 뉴스·발매 콘텐츠", "url": "https://www.musinsa.com/content/list?tagList=&contentCategoryCode=019003" }
+    ],
+    "instagramAccounts": [],
+    "instagramTags": ["발매정보", "한정판", "스니커즈발매"],
+    "sources": [
+      { "label": "루리웹 핫딜 게시판", "url": "https://bbs.ruliweb.com/market/board/1020" },
+      { "label": "today 발매 달력", "url": "https://sibna.kr/today/upcoming" }
+    ]
+  }
+}

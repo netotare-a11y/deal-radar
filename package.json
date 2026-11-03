@@ -1,0 +1,13 @@
+{
+  "name": "deal-radar",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "발매정보·핫딜 개인 브리핑 사이트",
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "collect": "node src/collect.mjs",
+    "preview": "node src/collect.mjs && node scripts/serve.mjs",
+    "test": "node --test tests/*.test.mjs"
+  }
+}

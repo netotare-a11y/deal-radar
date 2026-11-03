@@ -1,0 +1,75 @@
+name: android
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'android/**'
+      - '.github/workflows/android.yml'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: android
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+      # 서명 키는 처음 한 번만 만들고, 암호화해서 저장소에 보관한다.
+      # 같은 키를 계속 써야 휴대폰에서 앱을 덮어써 업데이트할 수 있다.
+      - name: Prepare signing key
+        run: |
+          test -n "$KEYSTORE_PASSWORD" || { echo "ANDROID_KEYSTORE_PASSWORD 시크릿이 없습니다."; exit 1; }
+          ENC=android/release.keystore.enc
+          if [ -f "$ENC" ]; then
+            openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:KEYSTORE_PASSWORD -in "$ENC" -out android/release.keystore
+          else
+            keytool -genkeypair -keystore android/release.keystore -storetype PKCS12 \
+              -alias dealradar -keyalg RSA -keysize 2048 -validity 10000 \
+              -storepass:env KEYSTORE_PASSWORD -keypass:env KEYSTORE_PASSWORD -dname "CN=Deal Radar"
+            openssl enc -aes-256-cbc -pbkdf2 -iter 200000 -pass env:KEYSTORE_PASSWORD -in android/release.keystore -out "$ENC"
+          fi
+          {
+            echo "storeFile=release.keystore"
+            echo "storePassword=$KEYSTORE_PASSWORD"
+            echo "keyAlias=dealradar"
+            echo "keyPassword=$KEYSTORE_PASSWORD"
+          } > android/release-signing.properties
+      - name: Test and build
+        working-directory: android
+        run: >
+          gradle testReleaseUnitTest assembleRelease
+          -PsiteUrl="https://${GITHUB_REPOSITORY_OWNER}.github.io/${GITHUB_REPOSITORY#*/}/"
+          -PversionCode="${GITHUB_RUN_NUMBER}"
+      # 빌드가 성공한 뒤에만 새 키를 저장한다.
+      - name: Save new signing key
+        run: |
+          git add android/release.keystore.enc
+          if ! git diff --cached --quiet; then
+            git config user.name "deal-radar-bot"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git commit -m "chore: 앱 서명 키 보관 [skip ci]"
+            git push
+          fi
+      - name: Publish APK
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cp android/app/build/outputs/apk/release/app-release.apk deal-radar.apk
+          gh release view app >/dev/null 2>&1 || gh release create app --title "딜레이더 앱" --notes "휴대폰에서 deal-radar.apk 를 받아 설치하세요."
+          gh release upload app deal-radar.apk --clobber
