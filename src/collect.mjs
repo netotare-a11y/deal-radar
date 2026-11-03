@@ -5,6 +5,7 @@ import { matchesAny } from './lib/util.mjs';
 import { isDealAlertable, isReleaseAlertable } from './notify/rules.mjs';
 import { collectRuliweb } from './sources/ruliweb.mjs';
 import { collectSibna } from './sources/sibna.mjs';
+import { loadTrends } from './trends.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const DIST = join(ROOT, 'dist');
@@ -72,6 +73,7 @@ async function main() {
     releases: releases.map((item) => ({ ...item, watched: watched(item), alert: isReleaseAlertable(item, config, now) })),
     deals: deals.map((item) => ({ ...item, watched: watched(item), alert: isDealAlertable(item, config) })),
     news: sibna.data?.news ?? previous?.news ?? [],
+    trends: loadTrends(join(ROOT, 'trend')),
     shortcuts: config.shortcuts,
     alertPolicy: {
       quietStartHour: config.notify.quietHours.start,

@@ -1,0 +1,17 @@
+{
+  "manifest_version": 3,
+  "name": "딜레이더 인기 기록",
+  "version": "0.2.0",
+  "description": "직접 연 무신사 추천·KREAM 랭킹 화면의 상품 정보를 기록합니다.",
+  "permissions": ["storage", "downloads"],
+  "host_permissions": ["https://api.github.com/*"],
+  "background": { "service_worker": "background.js" },
+  "action": { "default_popup": "popup.html", "default_title": "딜레이더 인기 기록" },
+  "content_scripts": [
+    {
+      "matches": ["https://www.musinsa.com/main/*", "https://kream.co.kr/*"],
+      "js": ["extractor.js", "content.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}

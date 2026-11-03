@@ -74,6 +74,23 @@ gh workflow run collect.yml
 3. 앱을 처음 열 때 알림을 허용합니다.
 4. 이어서 나오는 배터리 최적화 제외 요청도 허용합니다. 거절하면 화면이 꺼진 동안 알림이 크게 늦어집니다.
 
+## 인기 탭과 Chrome 확장
+
+무신사와 KREAM은 서버 자동 수집이 막혀 있어, PC Chrome 확장(`extension/`)이 직접 연 화면을 읽어 `trend/*.json`에 올립니다. 올라가면 사이트가 자동으로 다시 배포됩니다.
+
+| 사이트 | 페이지 | 읽는 값 |
+| --- | --- | --- |
+| KREAM | `kream.co.kr/?tab=home_ranking_v2` | 순위, 순위 변동, 거래 수, 가격 |
+| 무신사 | `musinsa.com/main/musinsa/recommend` | 브랜드, 상품명, 가격, 할인율 |
+
+- 관심 수와 좋아요 수는 두 페이지에 숫자로 표시되지 않아 추적하지 않습니다.
+- 거래 급증은 이전 기록과 비교한 표시값의 증가분입니다. 큰 수는 사이트에서 반올림되어 보일 수 있습니다.
+- 페이지를 열 때만 기록됩니다. 확장은 사이트에 요청을 보내거나 자동으로 페이지를 조작하지 않습니다.
+
+설치: `chrome://extensions`에서 개발자 모드를 켜고 `extension` 폴더를 로드합니다.
+
+GitHub 토큰: [fine-grained 토큰](https://github.com/settings/personal-access-tokens/new)을 `deal-radar` 저장소 한 곳에만, Contents 읽기·쓰기 권한으로 만들어 확장 팝업에 저장합니다. 토큰이 만료되면 팝업에 실패 메시지가 나오므로 새 토큰으로 교체합니다.
+
 ## 알림 규칙
 
 - 설치 직후 이미 있던 글은 알리지 않습니다.
