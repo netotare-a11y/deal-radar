@@ -1,14 +1,14 @@
 const REFRESH_MS = 5 * 60 * 1000;
 const NEW_WINDOW_MS = 3 * 60 * 60 * 1000;
 const STALE_MS = 2 * 60 * 60 * 1000;
-const TABS = ['today', 'trends', 'releases', 'deals', 'news', 'links'];
+const TABS = ['today', 'releases', 'deals', 'news', 'links'];
 
 const view = document.getElementById('view');
 const updated = document.getElementById('updated');
 const alertBox = document.getElementById('alert');
 
 let feed = null;
-const filters = { releaseQuery: '', releaseMethod: '전체', dealQuery: '', dealCategory: '전체', kreamView: '거래 급증' };
+const filters = { releaseQuery: '', releaseMethod: '전체', dealQuery: '', dealCategory: '전체' };
 
 // 피드 내용은 외부 사이트에서 온 값이다. 화면에 넣을 때 항상 이스케이프한다.
 const esc = (value) => String(value ?? '').replace(/[&<>"']/g, (c) => (
@@ -192,75 +192,6 @@ function renderDeals() {
     <div id="results">${dealResults()}</div>`;
 }
 
-const won = (value) => (Number.isFinite(value) ? `${value.toLocaleString('ko-KR')}원` : '');
-
-function kreamRow(item) {
-  const change = item.isNewRank || item.enteredRanking
-    ? '<span class="delta up">신규</span>'
-    : item.rankChange > 0
-      ? `<span class="delta up">▲${item.rankChange}</span>`
-      : item.rankChange < 0
-        ? `<span class="delta down">▼${Math.abs(item.rankChange)}</span>`
-        : '';
-  const tradeGain = item.tradesDelta > 0
-    ? `<span class="delta up">거래 +${item.tradesDelta.toLocaleString('ko-KR')}${item.tradesGrowth === null ? '' : ` (${item.tradesGrowth.toFixed(1)}%)`}</span>`
-    : '';
-  const trades = Number.isFinite(item.trades) ? `<span>거래 ${item.trades.toLocaleString('ko-KR')}</span>` : '';
-  return `<a class="row" href="${esc(item.url)}" target="_blank" rel="noopener noreferrer">
-    <div class="time">${esc(item.rank ?? '')}</div>${thumb(item.image)}
-    <div class="body">
-      <div class="title">${esc(item.name)}</div>
-      <div class="meta"><span class="price">${esc(won(item.price))}</span>${change}${tradeGain}${trades}</div>
-    </div>
-  </a>`;
-}
-
-function kreamResults() {
-  const kream = feed.trends?.kream;
-  if (!kream) return list([], '아직 기록이 없습니다. PC Chrome에서 KREAM 랭킹을 열면 시작됩니다.');
-  if (filters.kreamView === '거래 급증') {
-    if (!kream.baselineAt) return list([], '비교할 이전 기록이 쌓이면 표시됩니다. 1시간 이상 지나서 다시 열어주세요.');
-    return list(kream.tradeRisers.map(kreamRow), '이전 기록보다 거래 수가 늘어난 상품이 없습니다.');
-  }
-  if (filters.kreamView === '순위 상승') {
-    return list(kream.rankRisers.map(kreamRow), '순위가 오른 상품이 없습니다.');
-  }
-  return list(kream.ranking.map(kreamRow), '');
-}
-
-function musinsaRow(item) {
-  const fresh = item.isNew ? '<span class="new">NEW</span>' : '';
-  const discount = item.discount ? `<span class="tag draw">${esc(item.discount)}%</span>` : '';
-  return `<a class="row" href="${esc(item.url)}" target="_blank" rel="noopener noreferrer">
-    ${thumb(item.image)}
-    <div class="body">
-      <div class="title">${esc(item.name)}</div>
-      <div class="meta"><span class="price">${esc(won(item.price))}</span>${discount}${fresh}<span>${esc(item.brand)}</span></div>
-    </div>
-  </a>`;
-}
-
-function recordedLabel(trend) {
-  if (!trend?.updatedAt) return '';
-  const base = trend.baselineAt ? ` · ${relativeTime(trend.baselineAt)} 기록과 비교` : '';
-  return `${relativeTime(trend.updatedAt)} 기록${base}`;
-}
-
-function renderTrends() {
-  const { kream, musinsa } = feed.trends ?? {};
-  return `<section class="section">
-      <div class="section-head"><h2>KREAM 랭킹</h2><span>${esc(recordedLabel(kream))}</span></div>
-      <div class="controls">${chips(['거래 급증', '순위 상승', '전체 랭킹'], filters.kreamView, 'kreamView')}</div>
-      <div id="results">${kreamResults()}</div>
-    </section>
-    <section class="section">
-      <div class="section-head"><h2>무신사 추천</h2><span>${esc(recordedLabel(musinsa))}</span></div>
-      ${list((musinsa?.items ?? []).map(musinsaRow), '아직 기록이 없습니다. PC Chrome에서 무신사 추천을 열면 시작됩니다.')}
-      <p class="hint">무신사 추천에는 순위와 좋아요 수가 표시되지 않아 인기 순서가 아닙니다. 로그인 계정에 따라 달라질 수 있습니다.</p>
-    </section>
-    <p class="hint">KREAM 관심 수와 무신사 좋아요 수는 두 페이지에 숫자로 표시되지 않아 추적하지 않습니다. PC에서 페이지를 열 때만 갱신됩니다.</p>`;
-}
-
 function renderNews() {
   const rows = feed.news.map((item) => `
     <a class="news-row" href="${esc(item.url)}" target="_blank" rel="noopener noreferrer">
@@ -324,7 +255,7 @@ function renderLinks() {
     </section>`;
 }
 
-const RENDERERS = { today: renderToday, trends: renderTrends, releases: renderReleases, deals: renderDeals, news: renderNews, links: renderLinks };
+const RENDERERS = { today: renderToday, releases: renderReleases, deals: renderDeals, news: renderNews, links: renderLinks };
 
 function currentTab() {
   const hash = location.hash.slice(1);
@@ -351,8 +282,7 @@ function bindThumbs(root) {
 function renderResults() {
   const box = document.getElementById('results');
   if (!box) return;
-  const results = { releases: releaseResults, deals: dealResults, trends: kreamResults };
-  box.innerHTML = results[currentTab()]();
+  box.innerHTML = currentTab() === 'releases' ? releaseResults() : dealResults();
   bindThumbs(box);
 }
 
