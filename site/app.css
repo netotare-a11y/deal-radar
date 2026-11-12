@@ -164,7 +164,7 @@ button { font: inherit; color: inherit; }
   object-fit: cover;
   display: block;
 }
-.main { min-width: 0; }
+.main { display: block; min-width: 0; overflow: hidden; }
 .name {
   overflow: hidden;
   font-weight: 600;
@@ -173,7 +173,7 @@ button { font: inherit; color: inherit; }
   -webkit-box-orient: vertical;
 }
 @media (min-width: 720px) { .name { display: block; white-space: nowrap; text-overflow: ellipsis; } }
-.sub { margin-top: 1px; color: var(--muted); font-size: 12px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.sub { display: block; margin-top: 1px; color: var(--muted); font-size: 12px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .sub b { color: var(--ink); font-weight: 600; }
 .right { text-align: right; white-space: nowrap; }
 .price { font-weight: 700; }
