@@ -7,6 +7,7 @@ import { collectRuliweb } from './sources/ruliweb.mjs';
 import { collectSibna } from './sources/sibna.mjs';
 import { collectSibnaKream } from './sources/sibnaKream.mjs';
 import { kreamAlerts, loadTrends } from './trends.mjs';
+import { attachStoreLinks, hotProducts, recommendProducts, recommendReleases } from './sourcing.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const DIST = join(ROOT, 'dist');
@@ -68,6 +69,15 @@ async function main() {
   // 날짜별 기록을 이어 가려면 실패해도 직전 기록을 유지해야 한다.
   const sibnaKreamData = sibnaKream.data ?? previous?.sibnaKream ?? null;
   const trends = loadTrends(join(ROOT, 'trend'), { sibna: sibnaKreamData, now });
+  const releasesOut = releases.map((item) => ({ ...item, watched: watched(item), alert: isReleaseAlertable(item, config, now) }));
+
+  const hot = hotProducts(trends);
+  const sourcing = {
+    releases: recommendReleases(releasesOut, hot, now),
+    products: recommendProducts(hot, now),
+  };
+  const storeLinks = await attachStoreLinks(sourcing.releases, { ...previous?.storeLinks });
+  trends.sourcing = sourcing;
 
   buildSite({
     siteName: config.siteName,
@@ -75,7 +85,7 @@ async function main() {
     repo: process.env.GITHUB_REPOSITORY ?? '',
     sources: [ruliweb.status, sibna.status, sibnaKream.status],
     // alert 는 안드로이드 앱이 알림을 띄울지 판단하는 값이다.
-    releases: releases.map((item) => ({ ...item, watched: watched(item), alert: isReleaseAlertable(item, config, now) })),
+    releases: releasesOut,
     // KREAM 소싱 알림은 앱이 이미 읽는 deals 에 실어 보내고, 사이트 핫딜 목록에서는 뺀다.
     deals: [
       ...deals.map((item) => ({ ...item, watched: watched(item), alert: isDealAlertable(item, config) })),
@@ -85,6 +95,8 @@ async function main() {
     trends,
     // 다음 실행이 날짜별 기록을 이어 가도록 원본을 남긴다.
     sibnaKream: sibnaKreamData,
+    // 발매 글에서 읽은 발매처 링크. 다음 실행 때 같은 글을 다시 요청하지 않게 남긴다.
+    storeLinks,
     shortcuts: config.shortcuts,
     alertPolicy: {
       quietStartHour: config.notify.quietHours.start,

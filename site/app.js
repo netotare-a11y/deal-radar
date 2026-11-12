@@ -10,7 +10,7 @@ const alertBox = document.getElementById('alert');
 let feed = null;
 // KREAM 소싱 알림은 앱 알림용으로 deals 에 섞여 오므로 핫딜 목록에서는 뺀다.
 const hotDeals = () => feed.deals.filter((item) => item.kind !== 'kream');
-const filters = { releaseQuery: '', releaseMethod: '전체', dealQuery: '', dealCategory: '전체', kreamView: '순위 급상승', freqDays: '7일', sibnaList: '거래 활발' };
+const filters = { releaseQuery: '', releaseMethod: '전체', dealQuery: '', dealCategory: '전체', kreamView: '순위 급상승', freqDays: '7일', sibnaList: '거래 활발', recView: '발매 예정' };
 
 // 피드 내용은 외부 사이트에서 온 값이다. 화면에 넣을 때 항상 이스케이프한다.
 const esc = (value) => String(value ?? '').replace(/[&<>"']/g, (c) => (
@@ -326,12 +326,53 @@ function renderSibnaRank() {
     </section>`;
 }
 
+function linkButtons(item) {
+  const stores = (item.storeLinks ?? []).map((link) => ({ ...link, label: `발매처 · ${link.label}`, main: true }));
+  const post = item.postUrl ? [{ label: '발매 정보', url: item.postUrl }] : [];
+  return [...stores, ...post, ...item.links].map((link) => (
+    `<a class="btn-link ${link.main ? 'main' : ''}" href="${esc(link.url)}" target="_blank" rel="noopener noreferrer">${esc(link.label)} ↗</a>`
+  )).join('');
+}
+
+function recRow(item, index) {
+  const when = item.date
+    ? `<span class="delta up">${esc(`${Number(item.date.slice(5, 7))}/${Number(item.date.slice(8, 10))}`)}${item.time ? ` ${esc(item.time)}` : ''}</span>${item.method ? `<span class="tag ${item.method === '응모' ? 'draw' : ''}">${esc(item.method)}</span>` : ''}`
+    : `<span class="price">${esc(won(item.price))}</span>`;
+  const similar = item.similar
+    ? `<div class="meta"><a class="similar" href="${esc(item.similar.url)}" target="_blank" rel="noopener noreferrer">비슷한 크림 상품: ${esc(item.similar.name)} ↗</a></div>` : '';
+  return `<div class="row rec">
+    <div class="time">${index + 1}</div>${thumb(item.image)}
+    <div class="body">
+      <div class="title">${esc(item.name)}</div>
+      <div class="meta">${when}<span class="score">점수 ${esc(item.score)}</span></div>
+      <div class="meta">${item.reasons.map((reason) => `<span class="tag">${esc(reason)}</span>`).join('')}</div>
+      ${similar}
+      <div class="btns">${linkButtons(item)}</div>
+    </div>
+  </div>`;
+}
+
+function renderSourcing() {
+  const sourcing = feed.trends?.sourcing;
+  if (!sourcing) return '';
+  const isRelease = filters.recView === '발매 예정';
+  const rows = isRelease ? sourcing.releases : sourcing.products;
+  return `<section class="section">
+      <div class="section-head"><h2>소싱 추천</h2><span>크림·sibna 흐름 기준</span></div>
+      <div class="controls">${chips(['발매 예정', '신상품'], filters.recView, 'recView')}</div>
+      ${list(rows.map(recRow), isRelease ? '추천할 발매가 아직 없습니다.' : '추천할 신상품이 아직 없습니다.')}
+      <p class="hint">${isRelease
+        ? '요즘 크림·sibna에서 자주 뜨는 브랜드, 이름이 비슷한 크림 상품의 웃돈, 관심 키워드, 응모 여부로 점수를 매깁니다. 비슷한 상품은 이름으로 추정한 것입니다.'
+        : '크림 뜨는 신상·sibna 신규 중 자주 등장하고 정가보다 비싸게 거래되며 관심이 느는 상품입니다. 정가보다 10% 넘게 싸게 거래되는 상품은 뺍니다.'}</p>
+    </section>`;
+}
+
 function renderTrends() {
   const { kream, musinsa } = feed.trends ?? {};
   const now = kstNow();
   const upcoming = feed.releases.filter((item) => item.date >= now.date && !isPast(item, now))
     .sort((a, b) => Number(b.watched) - Number(a.watched)).slice(0, 12);
-  return `${renderFrequent()}
+  return `${renderSourcing()}${renderFrequent()}
     <section class="section">
       <div class="section-head"><h2>KREAM 소싱</h2><span>${esc(recordedLabel(kream))}</span></div>
       <div class="controls">${chips(KREAM_VIEWS, filters.kreamView, 'kreamView')}</div>
