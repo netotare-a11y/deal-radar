@@ -1,14 +1,16 @@
 const REFRESH_MS = 5 * 60 * 1000;
 const NEW_WINDOW_MS = 3 * 60 * 60 * 1000;
 const STALE_MS = 2 * 60 * 60 * 1000;
-const TABS = ['today', 'releases', 'deals', 'news', 'links'];
+const TABS = ['today', 'trends', 'releases', 'deals', 'news', 'links'];
 
 const view = document.getElementById('view');
 const updated = document.getElementById('updated');
 const alertBox = document.getElementById('alert');
 
 let feed = null;
-const filters = { releaseQuery: '', releaseMethod: '전체', dealQuery: '', dealCategory: '전체' };
+// KREAM 소싱 알림은 앱 알림용으로 deals 에 섞여 오므로 핫딜 목록에서는 뺀다.
+const hotDeals = () => feed.deals.filter((item) => item.kind !== 'kream');
+const filters = { releaseQuery: '', releaseMethod: '전체', dealQuery: '', dealCategory: '전체', kreamView: '순위 급상승' };
 
 // 피드 내용은 외부 사이트에서 온 값이다. 화면에 넣을 때 항상 이스케이프한다.
 const esc = (value) => String(value ?? '').replace(/[&<>"']/g, (c) => (
@@ -101,7 +103,7 @@ function renderToday() {
   const past = today.filter((item) => isPast(item, now));
   const upcoming = remaining.find((item) => item.time);
   const later = feed.releases.filter((item) => item.date > now.date).slice(0, 6);
-  const hot = [...feed.deals]
+  const hot = [...hotDeals()]
     .filter((deal) => deal.best || deal.recommend > 0)
     .sort((a, b) => Number(b.best) - Number(a.best) || b.recommend - a.recommend)
     .slice(0, 6);
@@ -173,7 +175,7 @@ function renderReleases() {
 }
 
 function dealResults() {
-  const items = feed.deals
+  const items = hotDeals()
     .filter((item) => hasText(item, filters.dealQuery))
     .filter((item) => {
       if (filters.dealCategory === '전체') return true;
@@ -184,12 +186,114 @@ function dealResults() {
 }
 
 function renderDeals() {
-  const categories = ['전체', 'BEST', ...new Set(feed.deals.map((item) => item.category).filter(Boolean))];
+  const categories = ['전체', 'BEST', ...new Set(hotDeals().map((item) => item.category).filter(Boolean))];
   return `<div class="controls">
       ${searchBox('dealQuery', filters.dealQuery, '상품·판매처 검색')}
       ${chips(categories, filters.dealCategory, 'dealCategory')}
     </div>
     <div id="results">${dealResults()}</div>`;
+}
+
+const won = (value) => (Number.isFinite(value) ? `${value.toLocaleString('ko-KR')}원` : '');
+
+function kreamRow(item) {
+  const change = item.isNewRank || item.enteredRanking
+    ? '<span class="delta up">신규</span>'
+    : item.rankChange > 0
+      ? `<span class="delta up">▲${item.rankChange}</span>`
+      : item.rankChange < 0
+        ? `<span class="delta down">▼${Math.abs(item.rankChange)}</span>`
+        : '';
+  const wish = item.wishDelta > 0
+    ? `<span class="delta up">관심 +${item.wishDelta.toLocaleString('ko-KR')}${item.wishGrowth === null ? '' : ` (${item.wishGrowth.toFixed(1)}%)`}</span>`
+    : Number.isFinite(item.wish) ? `<span>관심 ${item.wish.toLocaleString('ko-KR')}</span>` : '';
+  const premium = Number.isFinite(item.premiumPct)
+    ? `<span class="delta ${item.premiumPct > 0 ? 'up' : 'down'}">발매가 ${esc(won(item.releasePrice))} 대비 ${item.premiumPct > 0 ? '+' : ''}${item.premiumPct.toFixed(0)}%</span>`
+    : '';
+  const tradeGain = item.tradesDelta > 0
+    ? `<span class="delta up">거래 +${item.tradesDelta.toLocaleString('ko-KR')}${item.tradesGrowth === null ? '' : ` (${item.tradesGrowth.toFixed(1)}%)`}</span>`
+    : '';
+  const trades = Number.isFinite(item.trades) ? `<span>거래 ${item.trades.toLocaleString('ko-KR')}</span>` : '';
+  const released = item.releaseDate ? `<span>발매 ${esc(item.releaseDate.slice(2).replaceAll('-', '.'))}</span>` : '';
+  const badge = item.badge ? `<span class="tag best">${esc(item.badge)}</span>` : '';
+  return `<a class="row" href="${esc(item.url)}" target="_blank" rel="noopener noreferrer">
+    <div class="time">${esc(item.rank ?? '')}</div>${thumb(item.image)}
+    <div class="body">
+      <div class="title">${esc(item.name)}</div>
+      <div class="meta"><span class="price">${esc(won(item.price))}</span>${change}${wish}${premium}${tradeGain}${trades}${released}${badge}</div>
+    </div>
+  </a>`;
+}
+
+const KREAM_VIEWS = ['순위 급상승', '관심 급증', '뜨는 신상', '발매가 대비', '거래 급증', '전체 랭킹'];
+
+function kreamResults() {
+  const kream = feed.trends?.kream;
+  if (!kream) return list([], '아직 기록이 없습니다. PC 크롬이 켜져 있으면 2시간마다 자동으로 모읍니다.');
+  const view = filters.kreamView;
+  if (view === '관심 급증') {
+    return list(kream.wishRisers.map(kreamRow), '관심수 기록이 1시간 이상 쌓이면 표시됩니다.');
+  }
+  if (view === '뜨는 신상') return list(kream.fresh.map(kreamRow), '아직 뜨는 신상 기록이 없습니다.');
+  if (view === '발매가 대비') return list(kream.premium.map(kreamRow), '발매가보다 비싸게 거래되는 상품이 아직 없습니다.');
+  if (view === '거래 급증') {
+    if (!kream.baselineAt) return list([], '비교할 이전 기록이 쌓이면 표시됩니다.');
+    return list(kream.tradeRisers.map(kreamRow), '이전 기록보다 거래 수가 늘어난 상품이 없습니다.');
+  }
+  if (view === '순위 급상승') return list(kream.rankRisers.map(kreamRow), '순위가 오른 상품이 없습니다.');
+  return list(kream.ranking.map(kreamRow), '');
+}
+
+function musinsaRow(item) {
+  const fresh = item.isNew ? '<span class="new">NEW</span>' : '';
+  const discount = item.discount ? `<span class="tag draw">${esc(item.discount)}%</span>` : '';
+  return `<a class="row" href="${esc(item.url)}" target="_blank" rel="noopener noreferrer">
+    ${thumb(item.image)}
+    <div class="body">
+      <div class="title">${esc(item.name)}</div>
+      <div class="meta"><span class="price">${esc(won(item.price))}</span>${discount}${fresh}<span>${esc(item.brand)}</span></div>
+    </div>
+  </a>`;
+}
+
+function recordedLabel(trend) {
+  if (!trend?.updatedAt) return '';
+  const base = trend.baselineAt ? ` · ${relativeTime(trend.baselineAt)} 기록과 비교` : '';
+  return `${relativeTime(trend.updatedAt)} 기록${base}`;
+}
+
+// 발매 예정 상품을 크림 검색으로 바로 연결한다. 이름이 사이트마다 달라 자동으로 짝짓지는 않는다.
+function upcomingRow(item) {
+  const shortDate = `${Number(item.date.slice(5, 7))}/${Number(item.date.slice(8, 10))}`;
+  const method = item.method ? `<span class="tag ${item.method === '응모' ? 'draw' : ''}">${esc(item.method)}</span>` : '';
+  return `<a class="row" href="https://kream.co.kr/search?keyword=${encodeURIComponent(item.title)}" target="_blank" rel="noopener noreferrer">
+    <div class="time">${esc(shortDate)}</div>${thumb(item.image)}
+    <div class="body">
+      <div class="title">${esc(item.title)}</div>
+      <div class="meta">${item.time ? `<span>${esc(item.time)}</span>` : ''}${method}<span>크림 시세 보기 ↗</span></div>
+    </div>
+  </a>`;
+}
+
+function renderTrends() {
+  const { kream, musinsa } = feed.trends ?? {};
+  const now = kstNow();
+  const upcoming = feed.releases.filter((item) => item.date >= now.date && !isPast(item, now))
+    .sort((a, b) => Number(b.watched) - Number(a.watched)).slice(0, 12);
+  return `<section class="section">
+      <div class="section-head"><h2>KREAM 소싱</h2><span>${esc(recordedLabel(kream))}</span></div>
+      <div class="controls">${chips(KREAM_VIEWS, filters.kreamView, 'kreamView')}</div>
+      <div id="results">${kreamResults()}</div>
+      <p class="hint">PC 크롬이 켜져 있으면 2시간마다 랭킹·뜨는 신상 각 50개와 급상승 상품 20개의 관심수·발매가를 읽습니다.</p>
+    </section>
+    <section class="section">
+      <div class="section-head"><h2>곧 발매 · 크림 시세 확인</h2><a href="#releases">전체 일정</a></div>
+      ${list(upcoming.map(upcomingRow), '예정된 발매가 없습니다.')}
+    </section>
+    ${musinsa ? `<section class="section">
+      <div class="section-head"><h2>무신사 추천</h2><span>${esc(recordedLabel(musinsa))}</span></div>
+      ${list(musinsa.items.map(musinsaRow), '')}
+    </section>` : ''}`;
 }
 
 function renderNews() {
@@ -255,7 +359,7 @@ function renderLinks() {
     </section>`;
 }
 
-const RENDERERS = { today: renderToday, releases: renderReleases, deals: renderDeals, news: renderNews, links: renderLinks };
+const RENDERERS = { today: renderToday, trends: renderTrends, releases: renderReleases, deals: renderDeals, news: renderNews, links: renderLinks };
 
 function currentTab() {
   const hash = location.hash.slice(1);
@@ -282,7 +386,8 @@ function bindThumbs(root) {
 function renderResults() {
   const box = document.getElementById('results');
   if (!box) return;
-  box.innerHTML = currentTab() === 'releases' ? releaseResults() : dealResults();
+  const results = { releases: releaseResults, deals: dealResults, trends: kreamResults };
+  box.innerHTML = results[currentTab()]();
   bindThumbs(box);
 }
 

@@ -163,6 +163,10 @@ a { color: inherit; text-decoration: none; }
 .tag.best { color: var(--accent); }
 .tag.watch { color: var(--ok); }
 .new { color: var(--accent); font-weight: 700; }
+.delta { font-weight: 650; font-variant-numeric: tabular-nums; }
+.delta.up { color: var(--accent); }
+.delta.down { color: var(--muted); }
+.section-head span { text-align: right; }
 
 .controls { display: flex; flex-direction: column; gap: 10px; margin-bottom: 14px; }
 .search {

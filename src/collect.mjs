@@ -5,6 +5,7 @@ import { matchesAny } from './lib/util.mjs';
 import { isDealAlertable, isReleaseAlertable } from './notify/rules.mjs';
 import { collectRuliweb } from './sources/ruliweb.mjs';
 import { collectSibna } from './sources/sibna.mjs';
+import { kreamAlerts, loadTrends } from './trends.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const DIST = join(ROOT, 'dist');
@@ -61,7 +62,8 @@ async function main() {
 
   const watched = (item) => matchesAny(item.title, config.watchKeywords);
   const releases = sibna.data?.releases ?? previous?.releases ?? [];
-  const deals = ruliweb.data ?? previous?.deals ?? [];
+  const deals = ruliweb.data ?? previous?.deals?.filter((item) => item.kind !== 'kream') ?? [];
+  const trends = loadTrends(join(ROOT, 'trend'));
 
   buildSite({
     siteName: config.siteName,
@@ -70,8 +72,13 @@ async function main() {
     sources: [ruliweb.status, sibna.status],
     // alert 는 안드로이드 앱이 알림을 띄울지 판단하는 값이다.
     releases: releases.map((item) => ({ ...item, watched: watched(item), alert: isReleaseAlertable(item, config, now) })),
-    deals: deals.map((item) => ({ ...item, watched: watched(item), alert: isDealAlertable(item, config) })),
+    // KREAM 소싱 알림은 앱이 이미 읽는 deals 에 실어 보내고, 사이트 핫딜 목록에서는 뺀다.
+    deals: [
+      ...deals.map((item) => ({ ...item, watched: watched(item), alert: isDealAlertable(item, config) })),
+      ...kreamAlerts(trends.kream, config.kreamAlerts),
+    ],
     news: sibna.data?.news ?? previous?.news ?? [],
+    trends,
     shortcuts: config.shortcuts,
     alertPolicy: {
       quietStartHour: config.notify.quietHours.start,

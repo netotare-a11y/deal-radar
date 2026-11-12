@@ -17,6 +17,7 @@
     "morningDigest": true,
     "maxIndividualAlerts": 3
   },
+  "kreamAlerts": { "wishDelta": 300, "rankRise": 10, "premiumPct": 30, "freshTop": 5 },
   "shortcuts": {
     "musinsa": [
       { "label": "무신사 뉴스·발매 콘텐츠", "url": "https://www.musinsa.com/content/list?tagList=&contentCategoryCode=019003" }
