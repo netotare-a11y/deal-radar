@@ -6,6 +6,7 @@ import { isDealAlertable, isReleaseAlertable } from './notify/rules.mjs';
 import { collectRuliweb } from './sources/ruliweb.mjs';
 import { collectSibna } from './sources/sibna.mjs';
 import { collectSibnaKream } from './sources/sibnaKream.mjs';
+import { attachNaverRestock } from './sources/naverRestock.mjs';
 import { kreamAlerts, loadTrends } from './trends.mjs';
 import {
   attachRestock, attachStoreLinks, hotProducts, recommendBudget, recommendProducts, recommendReleases,
@@ -80,13 +81,27 @@ async function main() {
     budget: attachRestock(recommendBudget(hot, config.sourcing), releasesOut),
   };
   const storeLinks = await attachStoreLinks(sourcing.releases, { ...previous?.storeLinks });
+
+  // 이미 발매된 추천 상품의 재입고 소식(네이버 블로그·카페). 키가 없으면 건너뛴다.
+  const naverCreds = process.env.NAVER_SEARCH_ID && process.env.NAVER_SEARCH_SECRET
+    ? { id: process.env.NAVER_SEARCH_ID, secret: process.env.NAVER_SEARCH_SECRET } : null;
+  const restockTargets = [...new Map([...sourcing.products, ...sourcing.budget].map((item) => [item.id, item])).values()];
+  const naver = naverCreds
+    ? await runSource('naverRestock', '네이버 재입고 소식', () => attachNaverRestock(restockTargets, { ...previous?.restockNews }, naverCreds, { now }))
+    : { status: { id: 'naverRestock', name: '네이버 재입고 소식', ok: false, error: '키 없음' }, data: null };
+  // 실패하면 직전 결과라도 붙인다.
+  const restockNews = naver.data ?? previous?.restockNews ?? {};
+  if (!naver.data) for (const item of restockTargets) item.naverRestock = restockNews[item.id]?.posts ?? [];
+  for (const items of [sourcing.products, sourcing.budget]) {
+    for (const item of items) item.naverRestock = restockTargets.find((t) => t.id === item.id)?.naverRestock ?? [];
+  }
   trends.sourcing = sourcing;
 
   buildSite({
     siteName: config.siteName,
     generatedAt: now.toISOString(),
     repo: process.env.GITHUB_REPOSITORY ?? '',
-    sources: [ruliweb.status, sibna.status, sibnaKream.status],
+    sources: [ruliweb.status, sibna.status, sibnaKream.status, ...(naverCreds ? [naver.status] : [])],
     // alert 는 안드로이드 앱이 알림을 띄울지 판단하는 값이다.
     releases: releasesOut,
     // KREAM 소싱 알림은 앱이 이미 읽는 deals 에 실어 보내고, 사이트 핫딜 목록에서는 뺀다.
@@ -100,6 +115,7 @@ async function main() {
     sibnaKream: sibnaKreamData,
     // 발매 글에서 읽은 발매처 링크. 다음 실행 때 같은 글을 다시 요청하지 않게 남긴다.
     storeLinks,
+    restockNews,
     shortcuts: config.shortcuts,
     alertPolicy: {
       quietStartHour: config.notify.quietHours.start,

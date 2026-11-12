@@ -160,14 +160,18 @@ function recRow(item, index) {
     ? `<p class="note"><b class="up">재입고·재발매 소식</b> ${esc(md(item.restock.date))} ${esc(item.restock.time)} · ${ext(item.restock.url, item.restock.title, '')}</p>` : '';
   const similar = item.similar
     ? `<p class="note">비슷한 크림 상품: ${ext(item.similar.url, item.similar.name, '')}${Number.isFinite(item.similar.premium) ? ` <b class="${item.similar.premiumSource === 'sibna' ? 'mute' : tone(item.similar.premium)}">${item.similar.premiumSource === 'sibna' ? 'sibna' : '발매가'} ${esc(pct(item.similar.premium))}</b>` : ''}</p>` : '';
+  const posts = item.naverRestock ?? [];
+  const naver = posts.length
+    ? `<div class="news-list"><span class="lab">재입고 소식</span>${posts.map((p) => `<a href="${esc(p.url)}" target="_blank" rel="noopener noreferrer"><span class="mute">${esc(p.date ? md(p.date) : '날짜?')} ${esc(p.source)}</span> ${esc(p.title)}</a>`).join('')}</div>`
+    : '';
   const released = item.releaseDate && item.releaseDate < kstNow().date;
   return expandable({
     num: index + 1,
     image: item.image,
     name: item.name,
-    sub: esc(item.reasons[0] ?? ''),
+    sub: `${item.restock || posts.length ? '<b class="up">재입고 소식</b> · ' : ''}${esc(item.reasons[0] ?? '')}`,
     right,
-    drawer: `${why(item.reasons)}${similar}${restock}
+    drawer: `${why(item.reasons)}${similar}${restock}${naver}
       ${linkGroup(isRelease ? '사러 가기' : '크림·검색', buy)}
       ${linkGroup(released ? '발매 지남·구할 곳' : '구할 곳', item.where)}`,
   });

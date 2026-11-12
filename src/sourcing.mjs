@@ -15,6 +15,8 @@ const BRANDS = {
 };
 const STOP = new Set(['발매', '출시', '오픈', '응모', '선착순', '드롭', 'drop', '신상', '컬렉션', 'collection', '한정', '국내', '정식', '제품', '-', 'x', '×']);
 
+export const brandNames = (brand) => BRANDS[brand] ?? [];
+
 export function brandOf(text) {
   const lower = String(text ?? '').toLowerCase();
   return Object.entries(BRANDS).find(([, names]) => names.some((name) => lower.includes(name)))?.[0] ?? null;
