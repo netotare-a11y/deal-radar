@@ -196,12 +196,15 @@ function fitBlock(fit) {
     </div>`;
 }
 
-/** 협업 상품이면 협업 상대가 누구인지, 왜 살 만한지, 지금 시장 근거를 보여 준다. */function collabBlock(collab) {
+/** 협업 상품이면 협업 상대가 누구인지, 왜 살 만한지, 지금 시장 근거와 예전 협업 바로가기를 보여 준다. */
+function collabBlock(collab) {
   if (!collab?.length) return '';
   return collab.map((c) => `<div class="collab">
       <div class="collab-head">협업 · ${esc(c.label)}</div>
       <p>${esc(c.about)}</p>
       <ul class="reasons">${c.why.map((w) => `<li>${esc(w)}</li>`).join('')}${c.market ? `<li class="market">${esc(c.market)}</li>` : ''}</ul>
+      ${linkGroup('예전 협업', c.links)}
+      ${linkGroup('지금 크림', (c.current ?? []).map((l) => ({ ...l, label: l.label.length > 28 ? `${l.label.slice(0, 27)}…` : l.label })))}
     </div>`).join('');
 }
 
