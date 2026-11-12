@@ -34,16 +34,16 @@ test('발매 글의 바로가기 칸에서 발매처 링크를 읽는다', () =>
 });
 
 const hot = [
-  { id: '1', name: '조던 1 x 트래비스 스캇 레트로 로우 카나리', brand: 'jordan', premium: 90, hits: 5, days: 3, sibnaNew: true },
-  { id: '2', name: 'Nike Dunk Low Black', premium: 20, freshRank: 2, hits: 3, days: 2, wishDelta: 400 },
-  { id: '3', name: '푸마 팔레르모', brand: 'puma', premium: -50, sibnaNew: true },
+  { id: '1', name: '조던 1 x 트래비스 스캇 레트로 로우 카나리', brand: 'jordan', premium: 90, premiumSource: 'kream', hits: 5, days: 3, sibnaNew: true },
+  { id: '2', name: 'Nike Dunk Low Black', premium: 20, premiumSource: 'kream', freshRank: 2, hits: 3, days: 2, wishDelta: 400 },
+  { id: '3', name: '푸마 팔레르모', brand: 'puma', premium: -50, premiumSource: 'kream', sibnaNew: true },
   { id: '4', name: '오래된 인기 상품', premium: 100, hits: 6, days: 7 },
 ];
 
 test('신상품 추천: 신상만, 정가보다 크게 싼 것은 빼고 점수 순', () => {
   const recs = recommendProducts(hot, new Date('2026-11-13T00:00:00Z'));
   assert.deepEqual(recs.map((r) => r.id), ['1', '2']);
-  assert.ok(recs[0].reasons.includes('정가 대비 +90%'));
+  assert.ok(recs[0].reasons.includes('발매가 대비 +90%'));
   assert.ok(recs[1].reasons.includes('관심 +400'));
   assert.equal(recs[0].links[0].url, 'https://kream.co.kr/products/1');
 });
@@ -70,7 +70,7 @@ test('저단가 회전: 6만 원 이하, 자주 뜨고 거래가 많은 순, 정
     { id: 's', name: 'Spao Basic Fur Fleece Zip Up Black', price: 21000, trades: 4437, kreamRank: 23 },
     { id: 'n', name: 'Nike Stride Top', price: 58000, trades: 13000, kreamRank: 38, hits: 2, days: 1 },
     { id: 'x', name: '비싼 자켓', price: 250000, trades: 9000, kreamRank: 1 },
-    { id: 'c', name: '너무 싼 신발', price: 30000, trades: 9000, premium: -45 },
+    { id: 'c', name: '너무 싼 신발', price: 30000, trades: 9000, premium: -45, premiumSource: 'kream' },
     { id: 'z', name: '조용한 상품', price: 10000 },
   ];
   const recs = recommendBudget(items, { maxPrice: 60000 });
@@ -97,4 +97,16 @@ test('리스탁: 같은 브랜드의 재입고·재발매 글과 모델명이 �
   assert.equal(findRestock('아디다스 삼바', releases), null);
   const [item] = attachRestock([{ name: '나이키 덩크 로우 블랙' }], releases);
   assert.equal(item.restock.date, '2026-11-21');
+});
+test('웃돈: 크림 발매가로 확인한 값을 쓰고, sibna 값은 확인 전으로 표시하며 점수를 줄인다', () => {
+  const recs = recommendProducts([
+    { id: 'p', name: '포켓몬 8박스', sibnaNew: true, premium: 933, premiumSource: 'sibna' },
+    { id: 'q', name: '확인된 상품', sibnaNew: true, premium: 60, premiumSource: 'kream' },
+    { id: 'r', name: 'sibna만 싼 상품', sibnaNew: true, premium: -30, premiumSource: 'sibna' },
+  ], new Date('2026-11-13T00:00:00Z'));
+  assert.deepEqual(recs.map((r) => r.id), ['q', 'p']);
+  assert.ok(recs[1].reasons.includes('sibna 정가 대비 +933%(확인 전)'));
+  assert.equal(recs[1].premiumSource, 'sibna');
+  // 933%여도 60%까지만, 그 절반만 반영된다: 1(신규) + 3(60/2/10) = 4
+  assert.equal(recs[1].score, 4);
 });

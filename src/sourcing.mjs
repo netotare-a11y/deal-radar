@@ -66,7 +66,7 @@ export function hotProducts(trends) {
       const old = byId.get(item.id);
       put(item.id, {
         id: item.id, name: item.name, brand: item.brand, image: old?.image ?? item.image,
-        price: old?.price ?? item.price, premium: old?.premium ?? item.vsRetail,
+        price: old?.price ?? item.price, sibnaPremium: item.vsRetail,
         ...(list === 'new' ? { sibnaNew: true } : {}),
       });
     }
@@ -74,8 +74,25 @@ export function hotProducts(trends) {
   for (const row of trends?.frequent?.windows?.[7] ?? []) {
     put(row.id, { id: row.id, name: byId.get(row.id)?.name ?? row.name, image: byId.get(row.id)?.image ?? row.image, hits: row.hits, days: row.days });
   }
-  return [...byId.values()].filter((item) => item.name);
+  const verified = kream?.verified ?? {};
+  return [...byId.values()].filter((item) => item.name).map((item) => {
+    if (Number.isFinite(item.premium)) return { ...item, premiumSource: 'kream' };
+    const v = verified[item.id];
+    if (v) return { ...item, premium: v.premiumPct, premiumSource: 'kream', releaseDate: item.releaseDate ?? v.releaseDate };
+    if (Number.isFinite(item.sibnaPremium)) return { ...item, premium: item.sibnaPremium, premiumSource: 'sibna' };
+    return item;
+  });
 }
+
+// sibna 정가가 틀린 상품이 있어(예: 8박스 묶음을 1박스 정가와 비교) 확인 전 값은 60%까지만, 그 절반만 반영한다.
+const premiumForScore = (item) => (item.premiumSource === 'sibna'
+  ? Math.max(-50, Math.min(item.premium, 60)) / 2
+  : item.premium);
+const premiumReason = (item) => (item.premiumSource === 'sibna'
+  ? `sibna 정가 대비 ${pct(item.premium)}(확인 전)`
+  : `발매가 대비 ${pct(item.premium)}`);
+// 크림 발매가로 확인된 값만 '너무 싸다'고 거른다.
+const tooCheap = (item, limit) => item.premiumSource === 'kream' && item.premium <= limit;
 
 const pct = (n) => `${n > 0 ? '+' : ''}${n.toFixed(0)}%`;
 
@@ -84,7 +101,7 @@ export function recommendProducts(hot, now = new Date(), limit = 15) {
   const recent = kst(new Date(now.getTime() - 60 * 86400000)).date;
   return hot
     .filter((item) => item.freshRank || item.sibnaNew || (item.releaseDate && item.releaseDate >= recent))
-    .filter((item) => !(item.premium <= -10))
+    .filter((item) => !tooCheap(item, -10))
     .map((item) => {
       const reasons = [];
       let score = 0;
@@ -92,8 +109,8 @@ export function recommendProducts(hot, now = new Date(), limit = 15) {
       if (item.sibnaNew) { score += 1; reasons.push('sibna 신규'); }
       if (item.hits) { score += Math.min(item.hits, 6); reasons.push(`7일 중 ${item.days}일 · ${item.hits}회 등장`); }
       if (Number.isFinite(item.premium)) {
-        score += item.premium > 0 ? Math.min(item.premium / 10, 5) : -2;
-        reasons.push(`정가 대비 ${pct(item.premium)}`);
+        score += premiumForScore(item) > 0 ? Math.min(premiumForScore(item) / 10, 5) : -2;
+        reasons.push(premiumReason(item));
       }
       if (item.wishDelta > 0) { score += Math.min(item.wishDelta / 200, 3); reasons.push(`관심 +${item.wishDelta.toLocaleString('ko-KR')}`); }
       return productRec(item, score, reasons);
@@ -107,6 +124,7 @@ function productRec(item, score, reasons) {
   return {
     id: item.id, name: item.name, image: item.image ?? null, price: item.price ?? null,
     premium: Number.isFinite(item.premium) ? Math.round(item.premium * 10) / 10 : null,
+    premiumSource: item.premiumSource ?? null,
     trades: item.trades ?? null, releaseDate: item.releaseDate ?? null,
     score: Math.round(score * 10) / 10, reasons,
     links: searchLinks(item.name, { kreamUrl: `https://kream.co.kr/products/${item.id}` }),
@@ -158,7 +176,7 @@ export function findRestock(name, releases) {
 export function recommendBudget(hot, { maxPrice = 60000, limit = 15 } = {}) {
   return hot
     .filter((item) => Number.isFinite(item.price) && item.price > 0 && item.price <= maxPrice)
-    .filter((item) => !(item.premium <= -40))
+    .filter((item) => !tooCheap(item, -40))
     .map((item) => {
       const reasons = [];
       let score = 0;
@@ -167,8 +185,8 @@ export function recommendBudget(hot, { maxPrice = 60000, limit = 15 } = {}) {
       if (item.kreamRank) { score += item.kreamRank <= 10 ? 3 : item.kreamRank <= 30 ? 1.5 : 0.5; reasons.push(`크림 랭킹 ${item.kreamRank}위`); }
       if (item.freshRank) { score += 1; reasons.push(`뜨는 신상 ${item.freshRank}위`); }
       if (Number.isFinite(item.premium)) {
-        score += item.premium > 0 ? Math.min(item.premium / 10, 3) : 0;
-        reasons.push(`정가 대비 ${pct(item.premium)}`);
+        score += premiumForScore(item) > 0 ? Math.min(premiumForScore(item) / 10, 3) : 0;
+        reasons.push(premiumReason(item));
       }
       return productRec(item, score, reasons);
     })
@@ -223,15 +241,16 @@ export function recommendReleases(releases, hot, now = new Date(), limit = 12) {
       }
       const similar = similarProduct(item.title, hot);
       if (similar && Number.isFinite(similar.premium)) {
-        score += similar.premium > 0 ? 3 + Math.min(similar.premium / 30, 3) : -1;
-        reasons.push(`비슷한 크림 상품 정가 대비 ${pct(similar.premium)}`);
+        const p = premiumForScore(similar);
+        score += p > 0 ? 3 + Math.min(p / 30, 3) : -1;
+        reasons.push(`비슷한 크림 상품 ${premiumReason(similar)}`);
       }
       if (item.watched) { score += 2; reasons.push('관심 키워드'); }
       if (item.method === '응모') { score += 1; reasons.push('응모(한정 수량)'); }
       return {
         id: item.id, name: item.title, image: item.image ?? null, date: item.date, time: item.time ?? '', method: item.method ?? '',
         score: Math.round(score * 10) / 10, reasons,
-        similar: similar ? { name: similar.name, url: `https://kream.co.kr/products/${similar.id}`, premium: similar.premium ?? null } : null,
+        similar: similar ? { name: similar.name, url: `https://kream.co.kr/products/${similar.id}`, premium: similar.premium ?? null, premiumSource: similar.premiumSource ?? null } : null,
         postUrl: item.url,
         links: searchLinks(item.title),
       };

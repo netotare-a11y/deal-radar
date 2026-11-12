@@ -146,6 +146,33 @@ function pickCandidates(main, fresh) {
   return [...new Set(ids)].slice(0, DETAIL_LIMIT);
 }
 
+const SITE_FEED = 'https://netotare-a11y.github.io/deal-radar/data/feed.json';
+const VERIFY_LIMIT = 15;
+const VERIFY_EVERY_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * sibna 정가가 틀린 상품이 있어, sibna 상위·추천 상품의 크림 발매가를 하루 한 번 읽어 확인한다.
+ * 사이트에 올라간 피드에서 상품 번호를 고른다.
+ */
+async function pickVerifyCandidates(already) {
+  try {
+    const feed = await (await fetch(`${SITE_FEED}?t=${Date.now()}`, { cache: 'no-store' })).json();
+    const { detailAt = {} } = await chrome.storage.local.get('detailAt');
+    const s = feed.trends?.sourcing ?? {};
+    const lists = feed.trends?.sibnaRank?.lists ?? {};
+    const ids = [
+      ...(s.products ?? []), ...(s.budget ?? []),
+      ...(lists.premium ?? []).slice(0, 10), ...(lists.sales ?? []).slice(0, 5),
+    ].map((item) => String(item.id));
+    return [...new Set(ids)]
+      .filter((id) => /^\d+$/.test(id) && !already.includes(id))
+      .filter((id) => !(Date.now() - (detailAt[id] ?? 0) < VERIFY_EVERY_MS))
+      .slice(0, VERIFY_LIMIT);
+  } catch {
+    return [];
+  }
+}
+
 async function runCycle() {
   const { cycle } = await chrome.storage.local.get('cycle');
   // 서비스 워커가 중간에 꺼진 경우를 대비해 20분 지난 실행 표시는 무시한다.
@@ -159,14 +186,19 @@ async function runCycle() {
     if (!ranking?.main?.length) throw new Error('랭킹을 읽지 못했습니다. KREAM 화면이 바뀌었을 수 있습니다.');
 
     let detailCount = 0;
-    for (const id of pickCandidates(ranking.main, ranking.fresh ?? [])) {
+    const main = pickCandidates(ranking.main, ranking.fresh ?? []);
+    const ids = [...main, ...(await pickVerifyCandidates(main))];
+    const { detailAt = {} } = await chrome.storage.local.get('detailAt');
+    for (const id of ids) {
       const detail = await openAndWait(`https://kream.co.kr/products/${id}#dealradar-auto`);
       if (detail) {
         await saveDetail(detail);
+        detailAt[id] = Date.now();
         detailCount += 1;
       }
       await sleep(PAGE_GAP_MS);
     }
+    await chrome.storage.local.set({ detailAt });
 
     const uploaded = await upload('kream', {
       force: true,

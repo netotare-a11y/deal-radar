@@ -25,6 +25,13 @@ const hotDeals = () => feed.deals.filter((item) => item.kind !== 'kream');
 const won = (n) => (Number.isFinite(n) ? `${n.toLocaleString('ko-KR')}원` : '');
 const pct = (n, digits = 0) => (Number.isFinite(n) ? `${n > 0 ? '+' : ''}${n.toFixed(digits)}%` : '');
 const tone = (n) => (n > 0 ? 'up' : n < 0 ? 'down' : 'mute');
+/** 크림 발매가로 확인한 웃돈은 빨강·파랑, sibna 정가 기준(확인 전)은 회색으로 보여 준다. */
+function premTag(item, digits = 0) {
+  if (!Number.isFinite(item.premium)) return '';
+  return item.premiumSource === 'sibna'
+    ? `<div class="sig mute" title="sibna 정가 기준. 크림 발매가로 아직 확인하지 못했습니다.">sibna ${esc(pct(item.premium, digits))}</div>`
+    : `<div class="sig ${tone(item.premium)}" title="크림 발매가 기준">발매가 ${esc(pct(item.premium, digits))}</div>`;
+}
 const md = (ymd) => `${Number(ymd.slice(5, 7))}/${Number(ymd.slice(8, 10))}`;
 
 function kstNow() {
@@ -146,13 +153,13 @@ function recRow(item, index) {
   const isRelease = Boolean(item.date);
   const right = isRelease
     ? `<div class="price">${esc(md(item.date))} ${esc(item.time)}</div><div class="sig ${item.method === '응모' ? 'up' : 'mute'}">${esc(item.method)}</div>`
-    : `<div class="price">${esc(won(item.price))}</div>${Number.isFinite(item.premium) ? `<div class="sig ${tone(item.premium)}">정가 ${esc(pct(item.premium))}</div>` : ''}`;
+    : `<div class="price">${esc(won(item.price))}</div>${premTag(item)}`;
   const stores = (item.storeLinks ?? []).map((l) => ({ label: `발매처 ${l.label}`, url: l.url, primary: true }));
   const buy = [...stores, ...(item.postUrl ? [{ label: '발매 정보', url: item.postUrl }] : []), ...item.links];
   const restock = item.restock
     ? `<p class="note"><b class="up">재입고·재발매 소식</b> ${esc(md(item.restock.date))} ${esc(item.restock.time)} · ${ext(item.restock.url, item.restock.title, '')}</p>` : '';
   const similar = item.similar
-    ? `<p class="note">비슷한 크림 상품: ${ext(item.similar.url, item.similar.name, '')}${Number.isFinite(item.similar.premium) ? ` <b class="${tone(item.similar.premium)}">정가 ${esc(pct(item.similar.premium))}</b>` : ''}</p>` : '';
+    ? `<p class="note">비슷한 크림 상품: ${ext(item.similar.url, item.similar.name, '')}${Number.isFinite(item.similar.premium) ? ` <b class="${item.similar.premiumSource === 'sibna' ? 'mute' : tone(item.similar.premium)}">${item.similar.premiumSource === 'sibna' ? 'sibna' : '발매가'} ${esc(pct(item.similar.premium))}</b>` : ''}</p>` : '';
   const released = item.releaseDate && item.releaseDate < kstNow().date;
   return expandable({
     num: index + 1,
@@ -170,7 +177,7 @@ function kreamRow(item) {
   const signal = item.wishDelta > 0 ? `<div class="sig up">관심 +${item.wishDelta.toLocaleString('ko-KR')}</div>`
     : item.isNewRank || item.enteredRanking ? '<div class="sig up">신규</div>'
       : item.rankChange ? `<div class="sig ${tone(item.rankChange)}">${item.rankChange > 0 ? '▲' : '▼'}${Math.abs(item.rankChange)}</div>`
-        : Number.isFinite(item.premiumPct) ? `<div class="sig ${tone(item.premiumPct)}">정가 ${esc(pct(item.premiumPct))}</div>` : '';
+        : Number.isFinite(item.premiumPct) ? `<div class="sig ${tone(item.premiumPct)}">발매가 ${esc(pct(item.premiumPct))}</div>` : '';
   const facts = [
     Number.isFinite(item.wish) ? `관심 ${item.wish.toLocaleString('ko-KR')}${item.wishDelta > 0 ? ` (+${item.wishDelta.toLocaleString('ko-KR')})` : ''}` : '',
     Number.isFinite(item.premiumPct) ? `발매가 ${won(item.releasePrice)} 대비 ${pct(item.premiumPct)}` : '',
@@ -195,7 +202,7 @@ function frequentRow(item, index) {
     image: item.image,
     name: item.name,
     sub: `<b>${item.days}일 · ${item.hits}회</b> · ${esc(item.sources.join(', '))}`,
-    right: `<div class="price">${esc(won(item.price))}</div>${Number.isFinite(item.vsRetail) ? `<div class="sig ${tone(item.vsRetail)}">정가 ${esc(pct(item.vsRetail, 1))}</div>` : ''}`,
+    right: `<div class="price">${esc(won(item.price))}</div>${premTag(item, 1)}`,
     drawer: `${why(item.sources)}${linkGroup('바로가기', productLinks(item.id, item.name))}`,
   });
 }
@@ -206,8 +213,11 @@ function sibnaRow(item) {
     image: item.image,
     name: item.name,
     sub: esc([item.brand, item.activity ? `활발도 ${item.activity}` : ''].filter(Boolean).join(' · ')),
-    right: `<div class="price">${esc(won(item.price))}</div>${Number.isFinite(item.vsRetail) ? `<div class="sig ${tone(item.vsRetail)}">정가 ${esc(pct(item.vsRetail, 1))}</div>` : ''}`,
-    drawer: linkGroup('바로가기', [...productLinks(item.id, item.name), { label: 'sibna 분석', url: item.sibnaUrl }]),
+    right: `<div class="price">${esc(won(item.price))}</div>${premTag(item, 1)}`,
+    drawer: `<p class="why">${item.premiumSource === 'kream'
+      ? `<span>크림 발매가 ${esc(won(item.releasePrice))} 기준 ${esc(pct(item.premium, 1))}</span><span>sibna 표시 ${esc(pct(item.vsRetail, 1))}</span>`
+      : '<span>sibna 정가 기준 값입니다. 정가가 틀린 상품이 있어 크림 발매가로 확인 중입니다.</span>'}</p>`
+      + linkGroup('바로가기', [...productLinks(item.id, item.name), { label: 'sibna 분석', url: item.sibnaUrl }]),
   });
 }
 

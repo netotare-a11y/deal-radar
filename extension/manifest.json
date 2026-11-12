@@ -1,10 +1,10 @@
 {
   "manifest_version": 3,
   "name": "딜레이더 크림 소싱",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "크롬이 켜져 있으면 2시간마다 KREAM 랭킹·뜨는 신상과 급상승 상품의 관심수·발매가를 기록합니다.",
   "permissions": ["storage", "alarms"],
-  "host_permissions": ["https://api.github.com/*"],
+  "host_permissions": ["https://api.github.com/*", "https://netotare-a11y.github.io/*"],
   "background": { "service_worker": "background.js" },
   "icons": { "16": "icons/icon16.png", "32": "icons/icon32.png", "48": "icons/icon48.png", "128": "icons/icon128.png" },
   "action": {

@@ -92,10 +92,21 @@ export function buildKreamTrend(file) {
   for (const item of [...fresh, ...items]) byId.set(item.id, { ...byId.get(item.id), ...item });
   const all = [...byId.values()];
 
+  // 크림 상품 페이지의 발매가로 계산한 웃돈. sibna 정가 대비 값보다 이 값을 믿는다.
+  const verified = {};
+  for (const [id, detail] of Object.entries(details)) {
+    const price = byId.get(`kream:${id}`)?.price;
+    const stats = detailStats(detail, Number.isFinite(price) ? price : null);
+    if (Number.isFinite(stats.premiumPct)) {
+      verified[id] = { releasePrice: stats.releasePrice, premiumPct: Math.round(stats.premiumPct * 10) / 10, releaseDate: stats.releaseDate };
+    }
+  }
+
   return {
     updatedAt: file.updatedAt,
     baselineAt: baseline?.at ?? null,
     freshAt: file.freshAt ?? null,
+    verified,
     fresh,
     wishRisers: all
       .filter((item) => item.wishDelta > 0)
@@ -236,7 +247,7 @@ export function buildFrequent({ kreamFile, kreamTrend, sibna, now = new Date() }
         url: `https://kream.co.kr/products/${id}`,
         image: safeUrl(s?.image) ?? k?.image ?? null,
         price: k?.price ?? s?.price ?? null,
-        vsRetail: s?.vsRetail ?? (Number.isFinite(k?.premiumPct) ? Math.round(k.premiumPct * 10) / 10 : null),
+        ...premiumOf(id, kreamTrend?.verified, s?.vsRetail),
         hits: pairs.length,
         days: new Set(pairs.map((pair) => pair.slice(0, 10))).size,
         sources: sources.map((source) => SOURCE_LABELS[source] ?? source),
@@ -248,12 +259,24 @@ export function buildFrequent({ kreamFile, kreamTrend, sibna, now = new Date() }
   return { updatedAt: now.toISOString(), windows };
 }
 
+/**
+ * 웃돈(정가 대비 %). 크림 상품 페이지의 발매가로 계산한 값이 있으면 그것을 쓰고,
+ * 없으면 sibna 값을 '확인 안 됨'으로 표시한다. sibna 정가가 틀린 상품이 있어서다.
+ */
+export function premiumOf(id, verified, sibnaValue) {
+  const v = verified?.[id];
+  if (v) return { premium: v.premiumPct, premiumSource: 'kream', releasePrice: v.releasePrice };
+  return Number.isFinite(sibnaValue)
+    ? { premium: sibnaValue, premiumSource: 'sibna', releasePrice: null }
+    : { premium: null, premiumSource: null, releasePrice: null };
+}
+
 /** sibna 오늘의 랭킹 목록을 화면용으로 정리한다. */
-export function buildSibnaRank(sibna) {
+export function buildSibnaRank(sibna, verified = {}) {
   if (!sibna?.lists) return null;
   const lists = {};
   for (const [key, items] of Object.entries(sibna.lists)) {
-    lists[key] = items.map((item) => ({ ...item, url: `https://kream.co.kr/products/${item.id}`, sibnaUrl: `https://sibna.kr/today/kream/${item.id}` }));
+    lists[key] = items.map((item) => ({ ...item, ...premiumOf(item.id, verified, item.vsRetail), url: `https://kream.co.kr/products/${item.id}`, sibnaUrl: `https://sibna.kr/today/kream/${item.id}` }));
   }
   return { fetchedAt: sibna.fetchedAt, lists };
 }
@@ -275,7 +298,7 @@ export function loadTrends(dir, { sibna = null, now = new Date() } = {}) {
   return {
     kream,
     musinsa: buildMusinsaTrend(readFile(dir, 'musinsa')),
-    sibnaRank: buildSibnaRank(sibna),
+    sibnaRank: buildSibnaRank(sibna, kream?.verified),
     frequent: buildFrequent({ kreamFile, kreamTrend: kream, sibna, now }),
   };
 }
