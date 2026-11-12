@@ -8,6 +8,7 @@ import { collectSibna } from './sources/sibna.mjs';
 import { collectSibnaKream } from './sources/sibnaKream.mjs';
 import { attachNaverRestock } from './sources/naverRestock.mjs';
 import { collectSibnaNews, pickNews } from './sources/sibnaNews.mjs';
+import { collabInfo } from './collabs.mjs';
 import { kreamAlerts, loadTrends } from './trends.mjs';
 import {
   attachRestock, attachStoreLinks, hotProducts, recommendBudget, recommendProducts, recommendReleases,
@@ -89,6 +90,10 @@ async function main() {
     : [];
   sourcing.newsDate = sibnaNewsData?.date ?? null;
   sourcing.newsUrl = sibnaNewsData?.url ?? null;
+  // 협업 상품이면 협업 상대 소개와 지금 시장 근거를 붙인다.
+  for (const list of [sourcing.news, sourcing.releases, sourcing.products, sourcing.budget]) {
+    for (const item of list) item.collab = collabInfo(item.name, hot);
+  }
   const storeLinks = await attachStoreLinks(
     [...sourcing.releases, ...sourcing.news.filter((pick) => pick.postUrl)],
     { ...previous?.storeLinks },

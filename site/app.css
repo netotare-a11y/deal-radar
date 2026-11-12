@@ -314,3 +314,9 @@ details > summary::-webkit-details-marker { display: none; }
 .reasons li { margin: 2px 0; }
 .reasons.cautions { color: var(--muted); font-size: 12px; }
 .reasons.cautions li::marker { content: '! '; }
+
+.collab { margin-top: 10px; padding: 8px 10px; border-left: 3px solid var(--ink); background: var(--surface); }
+.collab-head { font-size: 12px; font-weight: 800; }
+.collab p { margin: 3px 0 0; font-size: 13px; }
+.collab .reasons { margin-top: 4px; }
+.collab .market { font-weight: 600; }

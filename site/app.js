@@ -169,16 +169,25 @@ function recRow(item, index) {
     num: index + 1,
     image: item.image,
     name: item.name,
-    sub: `${item.restock || posts.length ? '<b class="up">재입고 소식</b> · ' : ''}${esc(item.reasons[0] ?? '')}`,
+    sub: `${item.collab?.length ? `<b>협업 ${esc(item.collab[0].label.split(' (')[0])}</b> · ` : ''}${item.restock || posts.length ? '<b class="up">재입고 소식</b> · ' : ''}${esc(item.reasons[0] ?? '')}`,
     right,
-    drawer: `${why(item.reasons)}${similar}${restock}${naver}
+    drawer: `${why(item.reasons)}${similar}${restock}${naver}${collabBlock(item.collab)}
       ${linkGroup(isRelease ? '사러 가기' : '크림·검색', buy)}
       ${linkGroup(released ? '발매 지남·구할 곳' : '구할 곳', item.where)}`,
   });
 }
 
-/** sibna 발매뉴스에서 고른 '꼭 살 것' 한 줄. 이유를 문장으로 펼쳐 보여 준다. */
-function newsRow(item, index) {
+/** 협업 상품이면 협업 상대가 누구인지, 왜 살 만한지, 지금 시장 근거를 보여 준다. */
+function collabBlock(collab) {
+  if (!collab?.length) return '';
+  return collab.map((c) => `<div class="collab">
+      <div class="collab-head">협업 · ${esc(c.label)}</div>
+      <p>${esc(c.about)}</p>
+      <ul class="reasons">${c.why.map((w) => `<li>${esc(w)}</li>`).join('')}${c.market ? `<li class="market">${esc(c.market)}</li>` : ''}</ul>
+    </div>`).join('');
+}
+
+/** sibna 발매뉴스에서 고른 '꼭 살 것' 한 줄. 이유를 문장으로 펼쳐 보여 준다. */function newsRow(item, index) {
   const right = item.date
     ? `<div class="price">${esc(md(item.date))} ${esc(item.time)}</div><div class="sig ${item.method === '응모' ? 'up' : 'mute'}">${esc(item.method)}</div>`
     : (item.method ? `<div class="sig mute">${esc(item.method)}</div>` : '');
@@ -195,6 +204,7 @@ function newsRow(item, index) {
     drawer: `<p class="note">${esc(item.summary)}</p>
       <ul class="reasons">${item.reasons.map((r) => `<li>${esc(r)}</li>`).join('')}</ul>
       ${item.cautions.length ? `<ul class="reasons cautions">${item.cautions.map((r) => `<li>${esc(r)}</li>`).join('')}</ul>` : ''}
+      ${collabBlock(item.collab)}
       ${linkGroup('사러 가기', buy)}`,
   });
 }
