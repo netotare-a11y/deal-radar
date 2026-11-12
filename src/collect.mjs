@@ -7,7 +7,9 @@ import { collectRuliweb } from './sources/ruliweb.mjs';
 import { collectSibna } from './sources/sibna.mjs';
 import { collectSibnaKream } from './sources/sibnaKream.mjs';
 import { kreamAlerts, loadTrends } from './trends.mjs';
-import { attachStoreLinks, hotProducts, recommendProducts, recommendReleases } from './sourcing.mjs';
+import {
+  attachRestock, attachStoreLinks, hotProducts, recommendBudget, recommendProducts, recommendReleases,
+} from './sourcing.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const DIST = join(ROOT, 'dist');
@@ -74,7 +76,8 @@ async function main() {
   const hot = hotProducts(trends);
   const sourcing = {
     releases: recommendReleases(releasesOut, hot, now),
-    products: recommendProducts(hot, now),
+    products: attachRestock(recommendProducts(hot, now), releasesOut),
+    budget: attachRestock(recommendBudget(hot, config.sourcing), releasesOut),
   };
   const storeLinks = await attachStoreLinks(sourcing.releases, { ...previous?.storeLinks });
   trends.sourcing = sourcing;

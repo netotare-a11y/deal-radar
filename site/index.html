@@ -8,8 +8,8 @@
   <meta name="robots" content="noindex, nofollow">
   <meta name="referrer" content="no-referrer">
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src https: data:; style-src 'self' https://cdn.jsdelivr.net; font-src https://cdn.jsdelivr.net; script-src 'self'; connect-src 'self'; base-uri 'none'; form-action 'none'">
-  <meta name="theme-color" content="#f7f7f5" media="(prefers-color-scheme: light)">
-  <meta name="theme-color" content="#131417" media="(prefers-color-scheme: dark)">
+  <meta name="theme-color" content="#f4f3ef" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#111110" media="(prefers-color-scheme: dark)">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-title" content="딜레이더">
   <link rel="manifest" href="manifest.webmanifest">
@@ -21,17 +21,16 @@
 <body>
   <header class="top">
     <div class="top-row">
-      <h1 class="brand"><a href="#today">딜레이더</a></h1>
+      <h1 class="brand"><a href="#today">딜레이더<small>DEAL RADAR</small></a></h1>
+      <nav class="tabs" aria-label="메뉴">
+        <a href="#today" data-tab="today">오늘</a>
+        <a href="#trends" data-tab="trends">소싱</a>
+        <a href="#releases" data-tab="releases">발매</a>
+        <a href="#deals" data-tab="deals">핫딜</a>
+        <a href="#more" data-tab="more">더보기</a>
+      </nav>
       <p class="updated" id="updated" aria-live="polite"></p>
     </div>
-    <nav class="tabs" aria-label="메뉴">
-      <a href="#today" data-tab="today">오늘</a>
-      <a href="#trends" data-tab="trends">소싱</a>
-      <a href="#releases" data-tab="releases">발매 일정</a>
-      <a href="#deals" data-tab="deals">핫딜</a>
-      <a href="#news" data-tab="news">뉴스</a>
-      <a href="#links" data-tab="links">바로가기</a>
-    </nav>
   </header>
   <div id="alert" class="alert" hidden></div>
   <main id="view" class="view"><p class="empty">불러오는 중…</p></main>

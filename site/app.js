@@ -1,21 +1,31 @@
 const REFRESH_MS = 5 * 60 * 1000;
 const NEW_WINDOW_MS = 3 * 60 * 60 * 1000;
 const STALE_MS = 2 * 60 * 60 * 1000;
-const TABS = ['today', 'trends', 'releases', 'deals', 'news', 'links'];
+const PAGE = 10;
+const TABS = ['today', 'trends', 'releases', 'deals', 'more'];
+const ALIASES = { news: 'more', links: 'more' };
 
 const view = document.getElementById('view');
 const updated = document.getElementById('updated');
 const alertBox = document.getElementById('alert');
 
 let feed = null;
-// KREAM 소싱 알림은 앱 알림용으로 deals 에 섞여 오므로 핫딜 목록에서는 뺀다.
-const hotDeals = () => feed.deals.filter((item) => item.kind !== 'kream');
-const filters = { releaseQuery: '', releaseMethod: '전체', dealQuery: '', dealCategory: '전체', kreamView: '순위 급상승', freqDays: '7일', sibnaList: '거래 활발', recView: '발매 예정' };
+const state = {
+  releaseQuery: '', releaseMethod: '전체', dealQuery: '', dealCategory: '전체',
+  src: '추천', rec: '발매 예정', freq: '7일', kream: '순위 급상승', sibna: '거래 활발',
+  open: new Set(), // '더 보기'로 펼친 목록
+};
 
 // 피드 내용은 외부 사이트에서 온 값이다. 화면에 넣을 때 항상 이스케이프한다.
 const esc = (value) => String(value ?? '').replace(/[&<>"']/g, (c) => (
   { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
 ));
+// KREAM 소싱 알림은 앱 알림용으로 deals 에 섞여 오므로 핫딜 목록에서는 뺀다.
+const hotDeals = () => feed.deals.filter((item) => item.kind !== 'kream');
+const won = (n) => (Number.isFinite(n) ? `${n.toLocaleString('ko-KR')}원` : '');
+const pct = (n, digits = 0) => (Number.isFinite(n) ? `${n > 0 ? '+' : ''}${n.toFixed(digits)}%` : '');
+const tone = (n) => (n > 0 ? 'up' : n < 0 ? 'down' : 'mute');
+const md = (ymd) => `${Number(ymd.slice(5, 7))}/${Number(ymd.slice(8, 10))}`;
 
 function kstNow() {
   const iso = new Date(Date.now() + 9 * 3600 * 1000).toISOString();
@@ -23,15 +33,11 @@ function kstNow() {
 }
 
 const WEEKDAYS = ['일', '월', '화', '수', '목', '금', '토'];
-
 function dayLabel(ymd) {
-  const { date: today } = kstNow();
-  const diff = Math.round((Date.parse(`${ymd}T00:00:00Z`) - Date.parse(`${today}T00:00:00Z`)) / 86400000);
+  const diff = Math.round((Date.parse(`${ymd}T00:00:00Z`) - Date.parse(`${kstNow().date}T00:00:00Z`)) / 86400000);
   const d = new Date(`${ymd}T00:00:00Z`);
-  const base = `${d.getUTCMonth() + 1}월 ${d.getUTCDate()}일 (${WEEKDAYS[d.getUTCDay()]})`;
-  if (diff === 0) return `오늘 · ${base}`;
-  if (diff === 1) return `내일 · ${base}`;
-  return base;
+  const base = `${d.getUTCMonth() + 1}월 ${d.getUTCDate()}일 ${WEEKDAYS[d.getUTCDay()]}`;
+  return diff === 0 ? `오늘 · ${base}` : diff === 1 ? `내일 · ${base}` : base;
 }
 
 function relativeTime(iso) {
@@ -44,420 +50,310 @@ function relativeTime(iso) {
 }
 
 const isNew = (item) => item.postedAt && Date.now() - Date.parse(item.postedAt) < NEW_WINDOW_MS;
+const isPast = (item, now) => item.date === now.date && item.time && item.time < now.time;
 
-function thumb(url) {
-  return url
-    ? `<img class="thumb" src="${esc(url)}" alt="" loading="lazy" referrerpolicy="no-referrer" data-thumb>`
-    : '<div class="thumb"></div>';
+const thumb = (url) => (url
+  ? `<img class="thumb" src="${esc(url)}" alt="" loading="lazy" referrerpolicy="no-referrer" data-thumb>`
+  : '<div class="thumb"></div>');
+
+const ext = (url, label, cls = 'btn') => `<a class="${cls}" href="${esc(url)}" target="_blank" rel="noopener noreferrer">${esc(label)}</a>`;
+
+// ── 공통 조각 ─────────────────────────────
+
+function block(title, body, { count = '', aside = '' } = {}) {
+  return `<section class="block">
+    <div class="block-head"><h2>${esc(title)}</h2>${count !== '' ? `<span class="count">${esc(count)}</span>` : ''}${aside ? `<span class="aside">${aside}</span>` : ''}</div>
+    ${body}
+  </section>`;
 }
 
-function isPast(item, now) {
-  return item.date === now.date && item.time && item.time < now.time;
+/** 처음 10개만 보이고 '더 보기'로 펼친다. */
+function rows(items, render, { key, empty, limit = PAGE } = {}) {
+  if (!items.length) return `<div class="rows"><p class="empty">${esc(empty)}</p></div>`;
+  const all = !key || state.open.has(key);
+  const shown = all ? items : items.slice(0, limit);
+  const more = !all && items.length > limit
+    ? `<button class="more" type="button" data-more="${esc(key)}">더 보기 (${items.length - limit}개 더)</button>` : '';
+  return `<div class="rows">${shown.map(render).join('')}</div>${more}`;
 }
+
+function seg(values, selected, name, cls = 'seg') {
+  return `<div class="${cls}" role="group">${values.map((value) => (
+    `<button type="button" data-set="${name}" data-value="${esc(value)}" aria-pressed="${value === selected}">${esc(value)}</button>`
+  )).join('')}</div>`;
+}
+
+const searchBox = (name, value, placeholder) => (
+  `<input class="search" type="search" data-search="${name}" value="${esc(value)}" placeholder="${esc(placeholder)}" aria-label="${esc(placeholder)}">`
+);
+
+function linkGroup(label, links) {
+  if (!links?.length) return '';
+  return `<div class="links"><span class="lab">${esc(label)}</span>${links.map((l) => ext(l.url, `${l.label} ↗`, l.primary ? 'btn primary' : 'btn')).join('')}</div>`;
+}
+
+/** 크림 상품 하나로 바로 갈 수 있는 기본 버튼 묶음(서버가 따로 주지 않은 목록용). */
+function productLinks(id, name) {
+  const q = encodeURIComponent(name);
+  return [
+    { label: '크림', url: `https://kream.co.kr/products/${id}`, primary: true },
+    { label: '네이버쇼핑', url: `https://search.shopping.naver.com/search/all?query=${q}` },
+    { label: '무신사', url: `https://www.musinsa.com/search/goods?keyword=${q}` },
+    { label: '번개장터', url: `https://m.bunjang.co.kr/search/products?q=${q}` },
+  ];
+}
+
+/** 줄을 누르면 이유와 버튼이 펼쳐지는 항목. */
+function expandable({ num = '', image, name, sub = '', right = '', drawer }) {
+  return `<details>
+    <summary class="item"><span class="num">${esc(num)}</span>${thumb(image)}
+      <span class="main"><span class="name">${esc(name)}</span>${sub ? `<span class="sub">${sub}</span>` : ''}</span>
+      <span class="right">${right}</span>
+    </summary>
+    <div class="drawer">${drawer}</div>
+  </details>`;
+}
+
+const why = (reasons) => (reasons?.length ? `<p class="why">${reasons.map((r) => `<span>${esc(r)}</span>`).join('')}</p>` : '');
+
+// ── 행 종류 ─────────────────────────────
 
 function releaseRow(item, now, { showDate = false } = {}) {
-  const method = item.method ? `<span class="tag ${item.method === '응모' ? 'draw' : ''}">${esc(item.method)}</span>` : '';
-  const watch = item.watched ? '<span class="tag watch">관심</span>' : '';
-  const fresh = isNew(item) ? '<span class="new">NEW</span>' : '';
-  const shortDate = `${Number(item.date.slice(5, 7))}/${Number(item.date.slice(8, 10))}`;
-  const time = showDate
-    ? `<div class="time">${esc(shortDate)}</div>`
-    : `<div class="time ${item.time ? '' : 'none'}">${esc(item.time || '미정')}</div>`;
-  const clock = showDate && item.time ? `<span>${esc(item.time)}</span>` : '';
-  return `<a class="row ${isPast(item, now) ? 'past' : ''}" href="${esc(item.url)}" target="_blank" rel="noopener noreferrer">
-    ${time}${thumb(item.image)}
-    <div class="body">
-      <div class="title">${esc(item.title)}</div>
-      <div class="meta">${clock}${method}${watch}${fresh}</div>
-    </div>
+  const marks = [
+    item.method ? `<span class="${item.method === '응모' ? 'up' : ''}">${esc(item.method)}</span>` : '',
+    item.watched ? '<b>관심</b>' : '',
+  ].filter(Boolean).join(' · ');
+  const when = showDate ? md(item.date) : (item.time || '미정');
+  return `<a class="item ${isPast(item, now) ? 'past' : ''}" href="${esc(item.url)}" target="_blank" rel="noopener noreferrer">
+    <span class="num time">${esc(when)}</span>${thumb(item.image)}
+    <span class="main"><span class="name">${esc(item.title)}</span><span class="sub">${showDate && item.time ? `${esc(item.time)} · ` : ''}${marks}</span></span>
+    <span class="right">${isNew(item) ? '<span class="mark">NEW</span>' : ''}</span>
   </a>`;
 }
 
 function dealRow(item) {
-  const price = item.price ? `<span class="price">${esc(item.price)}</span>` : '';
-  const best = item.best ? '<span class="tag best">BEST</span>' : '';
-  const watch = item.watched ? '<span class="tag watch">관심</span>' : '';
-  const stats = [
-    item.store,
-    item.recommend ? `추천 ${item.recommend}` : '',
-    item.replies ? `댓글 ${item.replies}` : '',
-    item.postedAt ? relativeTime(item.postedAt) : '',
-  ].filter(Boolean).map((text) => `<span>${esc(text)}</span>`).join('');
-  return `<a class="row" href="${esc(item.url)}" target="_blank" rel="noopener noreferrer">
+  const stats = [item.store, item.recommend ? `추천 ${item.recommend}` : '', item.replies ? `댓글 ${item.replies}` : '', item.postedAt ? relativeTime(item.postedAt) : '']
+    .filter(Boolean).map(esc).join(' · ');
+  return `<a class="item no-num" href="${esc(item.url)}" target="_blank" rel="noopener noreferrer">
     ${thumb(item.image)}
-    <div class="body">
-      <div class="title">${esc(item.name)}</div>
-      <div class="meta">${price}${best}${watch}${stats}</div>
-    </div>
+    <span class="main"><span class="name">${esc(item.name)}</span><span class="sub">${item.best ? '<b class="up">BEST</b> · ' : ''}${item.watched ? '<b>관심</b> · ' : ''}${stats}</span></span>
+    <span class="right"><span class="price">${esc(item.price ?? '')}</span></span>
   </a>`;
 }
 
-const list = (rows, emptyText) => (rows.length
-  ? `<div class="list">${rows.join('')}</div>`
-  : `<div class="list"><p class="empty">${esc(emptyText)}</p></div>`);
+/** 소싱 추천(발매 예정·신상품·저단가) 한 줄. */
+function recRow(item, index) {
+  const isRelease = Boolean(item.date);
+  const right = isRelease
+    ? `<div class="price">${esc(md(item.date))} ${esc(item.time)}</div><div class="sig ${item.method === '응모' ? 'up' : 'mute'}">${esc(item.method)}</div>`
+    : `<div class="price">${esc(won(item.price))}</div>${Number.isFinite(item.premium) ? `<div class="sig ${tone(item.premium)}">정가 ${esc(pct(item.premium))}</div>` : ''}`;
+  const stores = (item.storeLinks ?? []).map((l) => ({ label: `발매처 ${l.label}`, url: l.url, primary: true }));
+  const buy = [...stores, ...(item.postUrl ? [{ label: '발매 정보', url: item.postUrl }] : []), ...item.links];
+  const restock = item.restock
+    ? `<p class="note"><b class="up">재입고·재발매 소식</b> ${esc(md(item.restock.date))} ${esc(item.restock.time)} · ${ext(item.restock.url, item.restock.title, '')}</p>` : '';
+  const similar = item.similar
+    ? `<p class="note">비슷한 크림 상품: ${ext(item.similar.url, item.similar.name, '')}${Number.isFinite(item.similar.premium) ? ` <b class="${tone(item.similar.premium)}">정가 ${esc(pct(item.similar.premium))}</b>` : ''}</p>` : '';
+  const released = item.releaseDate && item.releaseDate < kstNow().date;
+  return expandable({
+    num: index + 1,
+    image: item.image,
+    name: item.name,
+    sub: esc(item.reasons[0] ?? ''),
+    right,
+    drawer: `${why(item.reasons)}${similar}${restock}
+      ${linkGroup(isRelease ? '사러 가기' : '크림·검색', buy)}
+      ${linkGroup(released ? '발매 지남·구할 곳' : '구할 곳', item.where)}`,
+  });
+}
+
+function kreamRow(item) {
+  const signal = item.wishDelta > 0 ? `<div class="sig up">관심 +${item.wishDelta.toLocaleString('ko-KR')}</div>`
+    : item.isNewRank || item.enteredRanking ? '<div class="sig up">신규</div>'
+      : item.rankChange ? `<div class="sig ${tone(item.rankChange)}">${item.rankChange > 0 ? '▲' : '▼'}${Math.abs(item.rankChange)}</div>`
+        : Number.isFinite(item.premiumPct) ? `<div class="sig ${tone(item.premiumPct)}">정가 ${esc(pct(item.premiumPct))}</div>` : '';
+  const facts = [
+    Number.isFinite(item.wish) ? `관심 ${item.wish.toLocaleString('ko-KR')}${item.wishDelta > 0 ? ` (+${item.wishDelta.toLocaleString('ko-KR')})` : ''}` : '',
+    Number.isFinite(item.premiumPct) ? `발매가 ${won(item.releasePrice)} 대비 ${pct(item.premiumPct)}` : '',
+    Number.isFinite(item.trades) ? `거래 ${item.trades.toLocaleString('ko-KR')}${item.tradesDelta > 0 ? ` (+${item.tradesDelta.toLocaleString('ko-KR')})` : ''}` : '',
+    item.releaseDate ? `발매 ${item.releaseDate.slice(2).replaceAll('-', '.')}` : '',
+    item.badge ?? '',
+  ].filter(Boolean);
+  const id = item.id.replace(/^kream:/, '');
+  return expandable({
+    num: item.rank ?? '',
+    image: item.image,
+    name: item.name,
+    sub: esc(facts.slice(0, 2).join(' · ')),
+    right: `<div class="price">${esc(won(item.price))}</div>${signal}`,
+    drawer: `${why(facts)}${linkGroup('바로가기', productLinks(id, item.name))}`,
+  });
+}
+
+function frequentRow(item, index) {
+  return expandable({
+    num: index + 1,
+    image: item.image,
+    name: item.name,
+    sub: `<b>${item.days}일 · ${item.hits}회</b> · ${esc(item.sources.join(', '))}`,
+    right: `<div class="price">${esc(won(item.price))}</div>${Number.isFinite(item.vsRetail) ? `<div class="sig ${tone(item.vsRetail)}">정가 ${esc(pct(item.vsRetail, 1))}</div>` : ''}`,
+    drawer: `${why(item.sources)}${linkGroup('바로가기', productLinks(item.id, item.name))}`,
+  });
+}
+
+function sibnaRow(item) {
+  return expandable({
+    num: item.rank,
+    image: item.image,
+    name: item.name,
+    sub: esc([item.brand, item.activity ? `활발도 ${item.activity}` : ''].filter(Boolean).join(' · ')),
+    right: `<div class="price">${esc(won(item.price))}</div>${Number.isFinite(item.vsRetail) ? `<div class="sig ${tone(item.vsRetail)}">정가 ${esc(pct(item.vsRetail, 1))}</div>` : ''}`,
+    drawer: linkGroup('바로가기', [...productLinks(item.id, item.name), { label: 'sibna 분석', url: item.sibnaUrl }]),
+  });
+}
+
+// ── 오늘 ─────────────────────────────
 
 function renderToday() {
   const now = kstNow();
   const today = feed.releases.filter((item) => item.date === now.date);
   const remaining = today.filter((item) => !isPast(item, now));
   const past = today.filter((item) => isPast(item, now));
-  const upcoming = remaining.find((item) => item.time);
-  const later = feed.releases.filter((item) => item.date > now.date).slice(0, 6);
-  const hot = [...hotDeals()]
-    .filter((deal) => deal.best || deal.recommend > 0)
-    .sort((a, b) => Number(b.best) - Number(a.best) || b.recommend - a.recommend)
-    .slice(0, 6);
+  const next = remaining.find((item) => item.time);
+  const later = feed.releases.filter((item) => item.date > now.date);
+  const sourcing = feed.trends?.sourcing ?? {};
+  const hot = hotDeals().filter((d) => d.best || d.recommend > 0)
+    .sort((a, b) => Number(b.best) - Number(a.best) || b.recommend - a.recommend);
+  const goto = (src, rec, label) => `<button class="goto" type="button" data-goto="${src}" data-rec="${rec ?? ''}">${label} →</button>`;
 
-  const nextCard = upcoming ? `
-    <a class="next" href="${esc(upcoming.url)}" target="_blank" rel="noopener noreferrer">
-      ${thumb(upcoming.image)}
-      <div class="body">
-        <div class="next-label">다음 발매 · ${esc(upcoming.time)}</div>
-        <div class="next-title">${esc(upcoming.title)}</div>
-        <div class="meta">${upcoming.method ? `<span class="tag">${esc(upcoming.method)}</span>` : ''}</div>
-      </div>
+  const nextBar = next ? `<a class="next" href="${esc(next.url)}" target="_blank" rel="noopener noreferrer">
+      <span class="k">다음 발매</span><span class="t">${esc(next.title)}</span><span class="when">${esc(next.time)}${next.method ? ` · ${esc(next.method)}` : ''}</span>
     </a>` : '';
 
-  return `${nextCard}
-    <section class="section">
-      <div class="section-head"><h2>오늘 남은 발매<span class="day-count">${remaining.length}건</span></h2><a href="#releases">전체 일정</a></div>
-      ${list(remaining.map((item) => releaseRow(item, now)), past.length ? '오늘 발매는 모두 시작되었습니다.' : '오늘 등록된 발매가 없습니다.')}
-      ${past.length ? `<details class="past-group">
-        <summary>이미 시작한 발매 ${past.length}건</summary>
-        ${list(past.map((item) => releaseRow(item, now)), '')}
-      </details>` : ''}
-    </section>
-    <section class="section">
-      <div class="section-head"><h2>인기 핫딜</h2><a href="#deals">전체 핫딜</a></div>
-      ${list(hot.map(dealRow), '아직 추천이 쌓인 핫딜이 없습니다.')}
-    </section>
-    ${later.length ? `<section class="section">
-      <div class="section-head"><h2>곧 발매</h2><a href="#releases">더 보기</a></div>
-      ${list(later.map((item) => releaseRow(item, now, { showDate: true })), '')}
-    </section>` : ''}`;
+  const left = block('오늘 남은 발매', `${rows(remaining, (item) => releaseRow(item, now), { key: 'today-rel', empty: past.length ? '오늘 발매는 모두 시작됐습니다.' : '오늘 등록된 발매가 없습니다.', limit: 5 })}
+      ${past.length ? `<details><summary class="more">이미 시작한 발매 ${past.length}건</summary>${rows(past, (item) => releaseRow(item, now), {})}</details>` : ''}`,
+  { count: `${remaining.length}건`, aside: '<a href="#releases">전체 일정 →</a>' })
+    + block('곧 발매', rows(later.slice(0, 4), (item) => releaseRow(item, now, { showDate: true }), { empty: '예정된 발매가 없습니다.' }),
+      { aside: '<a href="#releases">더 보기 →</a>' });
+
+  const right = block('노려 볼 발매', rows((sourcing.releases ?? []).slice(0, 4), recRow, { empty: '추천할 발매가 아직 없습니다.' }), { aside: goto('추천', '발매 예정', '전체') })
+    + block('지금 뜨는 신상', rows((sourcing.products ?? []).slice(0, 4), recRow, { empty: '추천할 신상품이 아직 없습니다.' }), { aside: goto('추천', '신상품', '전체') })
+    + block('저단가 회전', rows((sourcing.budget ?? []).slice(0, 3), recRow, { empty: '조건에 맞는 상품이 아직 없습니다.' }), { aside: goto('저단가', '', '전체') })
+    + block('인기 핫딜', rows(hot.slice(0, 5), dealRow, { empty: '아직 추천이 쌓인 핫딜이 없습니다.' }), { aside: '<a href="#deals">전체 →</a>' });
+
+  return `${nextBar}<div class="grid2"><div>${left}</div><div>${right}</div></div>`;
 }
 
-function chips(values, selected, name) {
-  return `<div class="chips" role="group">${values.map((value) => (
-    `<button class="chip" type="button" data-filter="${name}" data-value="${esc(value)}" aria-pressed="${value === selected}">${esc(value)}</button>`
-  )).join('')}</div>`;
+// ── 소싱 ─────────────────────────────
+
+const SRC_VIEWS = ['추천', '저단가', '자주 뜸', '크림', 'sibna'];
+const KREAM_VIEWS = ['순위 급상승', '관심 급증', '뜨는 신상', '발매가 대비', '거래 급증', '전체 랭킹'];
+const SIBNA_LISTS = { '거래 활발': 'sales', 프리미엄: 'premium', '정가 이하': 'under', 신규: 'new' };
+
+function sourcingBody() {
+  const t = feed.trends ?? {};
+  const s = t.sourcing ?? {};
+  if (state.src === '추천') {
+    const isRelease = state.rec === '발매 예정';
+    return `${seg(['발매 예정', '신상품'], state.rec, 'rec', 'subseg')}
+      ${rows((isRelease ? s.releases : s.products) ?? [], recRow, { key: `rec-${state.rec}`, empty: '추천할 항목이 아직 없습니다.' })}
+      <p class="foot">${isRelease
+    ? '뜨는 브랜드, 이름이 비슷한 크림 상품의 웃돈, 관심 키워드, 응모 여부로 점수를 매깁니다. 줄을 누르면 발매처와 검색 버튼이 나옵니다.'
+    : '크림 뜨는 신상·sibna 신규 중 자주 보이고 웃돈이 붙거나 관심이 느는 상품입니다. 정가보다 10% 넘게 싼 것은 뺍니다.'}</p>`;
+  }
+  if (state.src === '저단가') {
+    return `${rows(s.budget ?? [], recRow, { key: 'budget', empty: '조건에 맞는 상품이 아직 없습니다.' })}
+      <p class="foot">크림 시세 6만 원 이하 중 자주 보이고 거래가 많은 상품입니다. 할인·쿠폰으로 싸게 사서 회전시키기 좋은 후보예요. 재고는 확인하지 않습니다.</p>`;
+  }
+  if (state.src === '자주 뜸') {
+    const list = t.frequent?.windows?.[parseInt(state.freq, 10)] ?? [];
+    return `${seg(['1일', '3일', '7일'], state.freq, 'freq', 'subseg')}
+      ${rows(list, frequentRow, { key: `freq-${state.freq}`, empty: '기록이 쌓이면 표시됩니다.' })}
+      <p class="foot">"3일 · 5회"는 기간 중 3일 동안 크림 랭킹·뜨는 신상·sibna 4개 목록에 합쳐 5번 나왔다는 뜻입니다.</p>`;
+  }
+  if (state.src === '크림') {
+    const k = t.kream;
+    const pick = {
+      '순위 급상승': k?.rankRisers, '관심 급증': k?.wishRisers, '뜨는 신상': k?.fresh,
+      '발매가 대비': k?.premium, '거래 급증': k?.tradeRisers, '전체 랭킹': k?.ranking,
+    }[state.kream] ?? [];
+    const recorded = k?.updatedAt ? `${relativeTime(k.updatedAt)} 기록` : '';
+    return `${seg(KREAM_VIEWS, state.kream, 'kream', 'subseg')}
+      ${rows(pick, kreamRow, { key: `kream-${state.kream}`, empty: k ? '이 조건의 상품이 아직 없습니다.' : 'PC 크롬 확장이 기록을 올리면 표시됩니다.' })}
+      <p class="foot">${esc(recorded)} · PC 크롬이 켜져 있으면 2시간마다 랭킹·뜨는 신상 각 50개와 상품 20개의 관심수·발매가를 읽습니다.</p>`;
+  }
+  const rank = t.sibnaRank;
+  const items = rank?.lists?.[SIBNA_LISTS[state.sibna]] ?? [];
+  return `${seg(Object.keys(SIBNA_LISTS), state.sibna, 'sibna', 'subseg')}
+    ${rows(items, sibnaRow, { key: `sibna-${state.sibna}`, empty: '아직 기록이 없습니다.' })}
+    <p class="foot">${rank ? `${esc(relativeTime(rank.fetchedAt))} 기록 · ` : ''}${ext('https://sibna.kr/today/kream_rank', 'sibna 크림 랭킹 원문 ↗', '')}</p>`;
 }
 
-function searchBox(name, value, placeholder) {
-  return `<input class="search" type="search" data-search="${name}" value="${esc(value)}" placeholder="${esc(placeholder)}" aria-label="${esc(placeholder)}">`;
-}
+const renderTrends = () => `${seg(SRC_VIEWS, state.src, 'src', 'seg sticky')}${sourcingBody()}`;
 
-const hasText = (item, query) => !query || item.title.toLowerCase().includes(query.toLowerCase());
+// ── 발매·핫딜·더보기 ─────────────────────────────
 
-function releaseResults() {
-  const now = kstNow();
-  const items = feed.releases
-    .filter((item) => hasText(item, filters.releaseQuery))
-    .filter((item) => filters.releaseMethod === '전체' || item.method === filters.releaseMethod);
-  if (!items.length) return list([], '조건에 맞는 발매가 없습니다.');
-
-  const byDate = new Map();
-  items.forEach((item) => byDate.set(item.date, [...(byDate.get(item.date) ?? []), item]));
-  return [...byDate].map(([date, group]) => `
-    <section class="section">
-      <div class="section-head"><h2>${esc(dayLabel(date))}<span class="day-count">${group.length}건</span></h2></div>
-      ${list(group.map((item) => releaseRow(item, now)), '')}
-    </section>`).join('');
-}
+const hasText = (text, query) => !query || text.toLowerCase().includes(query.toLowerCase());
 
 function renderReleases() {
+  const now = kstNow();
   const methods = ['전체', ...new Set(feed.releases.map((item) => item.method).filter(Boolean))];
-  return `<div class="controls">
-      ${searchBox('releaseQuery', filters.releaseQuery, '브랜드·상품 검색 (예: 나이키, 무신사)')}
-      ${chips(methods, filters.releaseMethod, 'releaseMethod')}
-    </div>
-    <div id="results">${releaseResults()}</div>`;
-}
-
-function dealResults() {
-  const items = hotDeals()
-    .filter((item) => hasText(item, filters.dealQuery))
-    .filter((item) => {
-      if (filters.dealCategory === '전체') return true;
-      if (filters.dealCategory === 'BEST') return item.best;
-      return item.category === filters.dealCategory;
-    });
-  return list(items.map(dealRow), '조건에 맞는 핫딜이 없습니다.');
+  const items = feed.releases
+    .filter((item) => hasText(item.title, state.releaseQuery))
+    .filter((item) => state.releaseMethod === '전체' || item.method === state.releaseMethod);
+  const groups = new Map();
+  items.forEach((item) => groups.set(item.date, [...(groups.get(item.date) ?? []), item]));
+  const body = items.length
+    ? `<div class="rows">${[...groups].map(([date, group]) => `<div class="day">${esc(dayLabel(date))} · ${group.length}건</div>${group.map((item) => releaseRow(item, now)).join('')}`).join('')}</div>`
+    : '<div class="rows"><p class="empty">조건에 맞는 발매가 없습니다.</p></div>';
+  return `<div class="toolbar">${searchBox('releaseQuery', state.releaseQuery, '브랜드·상품 검색 (예: 나이키)')}</div>
+    ${seg(methods, state.releaseMethod, 'releaseMethod', 'subseg')}
+    <div id="results">${body}</div>`;
 }
 
 function renderDeals() {
   const categories = ['전체', 'BEST', ...new Set(hotDeals().map((item) => item.category).filter(Boolean))];
-  return `<div class="controls">
-      ${searchBox('dealQuery', filters.dealQuery, '상품·판매처 검색')}
-      ${chips(categories, filters.dealCategory, 'dealCategory')}
-    </div>
-    <div id="results">${dealResults()}</div>`;
+  const items = hotDeals()
+    .filter((item) => hasText(item.name, state.dealQuery))
+    .filter((item) => state.dealCategory === '전체' || (state.dealCategory === 'BEST' ? item.best : item.category === state.dealCategory));
+  return `<div class="toolbar">${searchBox('dealQuery', state.dealQuery, '상품·판매처 검색')}</div>
+    ${seg(categories, state.dealCategory, 'dealCategory', 'subseg')}
+    <div id="results">${rows(items, dealRow, { key: 'deals', empty: '조건에 맞는 핫딜이 없습니다.', limit: 20 })}</div>`;
 }
 
-const won = (value) => (Number.isFinite(value) ? `${value.toLocaleString('ko-KR')}원` : '');
+const linkRows = (links) => `<div class="rows">${links.map((l) => `<a class="linkrow" href="${esc(l.url)}" target="_blank" rel="noopener noreferrer">${esc(l.label)}<span>열기 ↗</span></a>`).join('')}</div>`;
 
-function kreamRow(item) {
-  const change = item.isNewRank || item.enteredRanking
-    ? '<span class="delta up">신규</span>'
-    : item.rankChange > 0
-      ? `<span class="delta up">▲${item.rankChange}</span>`
-      : item.rankChange < 0
-        ? `<span class="delta down">▼${Math.abs(item.rankChange)}</span>`
-        : '';
-  const wish = item.wishDelta > 0
-    ? `<span class="delta up">관심 +${item.wishDelta.toLocaleString('ko-KR')}${item.wishGrowth === null ? '' : ` (${item.wishGrowth.toFixed(1)}%)`}</span>`
-    : Number.isFinite(item.wish) ? `<span>관심 ${item.wish.toLocaleString('ko-KR')}</span>` : '';
-  const premium = Number.isFinite(item.premiumPct)
-    ? `<span class="delta ${item.premiumPct > 0 ? 'up' : 'down'}">발매가 ${esc(won(item.releasePrice))} 대비 ${item.premiumPct > 0 ? '+' : ''}${item.premiumPct.toFixed(0)}%</span>`
-    : '';
-  const tradeGain = item.tradesDelta > 0
-    ? `<span class="delta up">거래 +${item.tradesDelta.toLocaleString('ko-KR')}${item.tradesGrowth === null ? '' : ` (${item.tradesGrowth.toFixed(1)}%)`}</span>`
-    : '';
-  const trades = Number.isFinite(item.trades) ? `<span>거래 ${item.trades.toLocaleString('ko-KR')}</span>` : '';
-  const released = item.releaseDate ? `<span>발매 ${esc(item.releaseDate.slice(2).replaceAll('-', '.'))}</span>` : '';
-  const badge = item.badge ? `<span class="tag best">${esc(item.badge)}</span>` : '';
-  return `<a class="row" href="${esc(item.url)}" target="_blank" rel="noopener noreferrer">
-    <div class="time">${esc(item.rank ?? '')}</div>${thumb(item.image)}
-    <div class="body">
-      <div class="title">${esc(item.name)}</div>
-      <div class="meta"><span class="price">${esc(won(item.price))}</span>${change}${wish}${premium}${tradeGain}${trades}${released}${badge}</div>
-    </div>
-  </a>`;
-}
-
-const KREAM_VIEWS = ['순위 급상승', '관심 급증', '뜨는 신상', '발매가 대비', '거래 급증', '전체 랭킹'];
-
-function kreamResults() {
-  const kream = feed.trends?.kream;
-  if (!kream) return list([], '아직 기록이 없습니다. PC 크롬이 켜져 있으면 2시간마다 자동으로 모읍니다.');
-  const view = filters.kreamView;
-  if (view === '관심 급증') {
-    return list(kream.wishRisers.map(kreamRow), '관심수 기록이 1시간 이상 쌓이면 표시됩니다.');
-  }
-  if (view === '뜨는 신상') return list(kream.fresh.map(kreamRow), '아직 뜨는 신상 기록이 없습니다.');
-  if (view === '발매가 대비') return list(kream.premium.map(kreamRow), '발매가보다 비싸게 거래되는 상품이 아직 없습니다.');
-  if (view === '거래 급증') {
-    if (!kream.baselineAt) return list([], '비교할 이전 기록이 쌓이면 표시됩니다.');
-    return list(kream.tradeRisers.map(kreamRow), '이전 기록보다 거래 수가 늘어난 상품이 없습니다.');
-  }
-  if (view === '순위 급상승') return list(kream.rankRisers.map(kreamRow), '순위가 오른 상품이 없습니다.');
-  return list(kream.ranking.map(kreamRow), '');
-}
-
-function musinsaRow(item) {
-  const fresh = item.isNew ? '<span class="new">NEW</span>' : '';
-  const discount = item.discount ? `<span class="tag draw">${esc(item.discount)}%</span>` : '';
-  return `<a class="row" href="${esc(item.url)}" target="_blank" rel="noopener noreferrer">
-    ${thumb(item.image)}
-    <div class="body">
-      <div class="title">${esc(item.name)}</div>
-      <div class="meta"><span class="price">${esc(won(item.price))}</span>${discount}${fresh}<span>${esc(item.brand)}</span></div>
-    </div>
-  </a>`;
-}
-
-function recordedLabel(trend) {
-  if (!trend?.updatedAt) return '';
-  const base = trend.baselineAt ? ` · ${relativeTime(trend.baselineAt)} 기록과 비교` : '';
-  return `${relativeTime(trend.updatedAt)} 기록${base}`;
-}
-
-// 발매 예정 상품을 크림 검색으로 바로 연결한다. 이름이 사이트마다 달라 자동으로 짝짓지는 않는다.
-function upcomingRow(item) {
-  const shortDate = `${Number(item.date.slice(5, 7))}/${Number(item.date.slice(8, 10))}`;
-  const method = item.method ? `<span class="tag ${item.method === '응모' ? 'draw' : ''}">${esc(item.method)}</span>` : '';
-  return `<a class="row" href="https://kream.co.kr/search?keyword=${encodeURIComponent(item.title)}" target="_blank" rel="noopener noreferrer">
-    <div class="time">${esc(shortDate)}</div>${thumb(item.image)}
-    <div class="body">
-      <div class="title">${esc(item.title)}</div>
-      <div class="meta">${item.time ? `<span>${esc(item.time)}</span>` : ''}${method}<span>크림 시세 보기 ↗</span></div>
-    </div>
-  </a>`;
-}
-
-const SIBNA_LISTS = { '거래 활발': 'sales', '프리미엄': 'premium', '정가 이하': 'under', '신규': 'new' };
-
-const pct = (value) => (Number.isFinite(value) ? `${value > 0 ? '+' : ''}${value.toFixed(1)}%` : '');
-
-function frequentRow(item, index) {
-  const vs = Number.isFinite(item.vsRetail)
-    ? `<span class="delta ${item.vsRetail > 0 ? 'up' : 'down'}">정가 대비 ${esc(pct(item.vsRetail))}</span>` : '';
-  return `<a class="row" href="${esc(item.url)}" target="_blank" rel="noopener noreferrer">
-    <div class="time">${index + 1}</div>${thumb(item.image)}
-    <div class="body">
-      <div class="title">${esc(item.name)}</div>
-      <div class="meta"><span class="delta up">${item.days}일 · ${item.hits}회</span><span class="price">${esc(won(item.price))}</span>${vs}</div>
-      <div class="meta">${item.sources.map((source) => `<span class="tag">${esc(source)}</span>`).join('')}</div>
-    </div>
-  </a>`;
-}
-
-function sibnaRow(item) {
-  const vs = Number.isFinite(item.vsRetail)
-    ? `<span class="delta ${item.vsRetail > 0 ? 'up' : 'down'}">정가 대비 ${esc(pct(item.vsRetail))}</span>` : '';
-  return `<a class="row" href="${esc(item.url)}" target="_blank" rel="noopener noreferrer">
-    <div class="time">${esc(item.rank)}</div>${thumb(item.image)}
-    <div class="body">
-      <div class="title">${esc(item.name)}</div>
-      <div class="meta"><span class="price">${esc(won(item.price))}</span>${vs}${item.activity ? `<span>활발도 ${esc(item.activity)}</span>` : ''}<span>${esc(item.brand)}</span></div>
-    </div>
-  </a>`;
-}
-
-function renderFrequent() {
-  const frequent = feed.trends?.frequent;
-  const rows = frequent?.windows?.[parseInt(filters.freqDays, 10)] ?? [];
-  return `<section class="section">
-      <div class="section-head"><h2>자주 뜨는 상품</h2><span>크림 랭킹·뜨는 신상·sibna 4개 목록</span></div>
-      <div class="controls">${chips(['1일', '3일', '7일'], filters.freqDays, 'freqDays')}</div>
-      ${list(rows.map(frequentRow), '기록이 쌓이면 표시됩니다. 하루에 한 번씩 쌓입니다.')}
-      <p class="hint">"3일 · 5회"는 기간 중 3일 동안, 날짜와 목록을 합쳐 5번 나왔다는 뜻입니다. 같은 날 같은 목록은 한 번만 셉니다.</p>
-    </section>`;
-}
-
-function renderSibnaRank() {
-  const rank = feed.trends?.sibnaRank;
-  if (!rank) return '';
-  const items = rank.lists[SIBNA_LISTS[filters.sibnaList]] ?? [];
-  return `<section class="section">
-      <div class="section-head"><h2>sibna 크림 랭킹</h2><a href="https://sibna.kr/today/kream_rank" target="_blank" rel="noopener noreferrer">${esc(relativeTime(rank.fetchedAt))} 기록 ↗</a></div>
-      <div class="controls">${chips(Object.keys(SIBNA_LISTS), filters.sibnaList, 'sibnaList')}</div>
-      ${list(items.map(sibnaRow), '이 목록은 비어 있습니다.')}
-    </section>`;
-}
-
-function linkButtons(item) {
-  const stores = (item.storeLinks ?? []).map((link) => ({ ...link, label: `발매처 · ${link.label}`, main: true }));
-  const post = item.postUrl ? [{ label: '발매 정보', url: item.postUrl }] : [];
-  return [...stores, ...post, ...item.links].map((link) => (
-    `<a class="btn-link ${link.main ? 'main' : ''}" href="${esc(link.url)}" target="_blank" rel="noopener noreferrer">${esc(link.label)} ↗</a>`
-  )).join('');
-}
-
-function recRow(item, index) {
-  const when = item.date
-    ? `<span class="delta up">${esc(`${Number(item.date.slice(5, 7))}/${Number(item.date.slice(8, 10))}`)}${item.time ? ` ${esc(item.time)}` : ''}</span>${item.method ? `<span class="tag ${item.method === '응모' ? 'draw' : ''}">${esc(item.method)}</span>` : ''}`
-    : `<span class="price">${esc(won(item.price))}</span>`;
-  const similar = item.similar
-    ? `<div class="meta"><a class="similar" href="${esc(item.similar.url)}" target="_blank" rel="noopener noreferrer">비슷한 크림 상품: ${esc(item.similar.name)} ↗</a></div>` : '';
-  return `<div class="row rec">
-    <div class="time">${index + 1}</div>${thumb(item.image)}
-    <div class="body">
-      <div class="title">${esc(item.name)}</div>
-      <div class="meta">${when}<span class="score">점수 ${esc(item.score)}</span></div>
-      <div class="meta">${item.reasons.map((reason) => `<span class="tag">${esc(reason)}</span>`).join('')}</div>
-      ${similar}
-      <div class="btns">${linkButtons(item)}</div>
-    </div>
-  </div>`;
-}
-
-function renderSourcing() {
-  const sourcing = feed.trends?.sourcing;
-  if (!sourcing) return '';
-  const isRelease = filters.recView === '발매 예정';
-  const rows = isRelease ? sourcing.releases : sourcing.products;
-  return `<section class="section">
-      <div class="section-head"><h2>소싱 추천</h2><span>크림·sibna 흐름 기준</span></div>
-      <div class="controls">${chips(['발매 예정', '신상품'], filters.recView, 'recView')}</div>
-      ${list(rows.map(recRow), isRelease ? '추천할 발매가 아직 없습니다.' : '추천할 신상품이 아직 없습니다.')}
-      <p class="hint">${isRelease
-        ? '요즘 크림·sibna에서 자주 뜨는 브랜드, 이름이 비슷한 크림 상품의 웃돈, 관심 키워드, 응모 여부로 점수를 매깁니다. 비슷한 상품은 이름으로 추정한 것입니다.'
-        : '크림 뜨는 신상·sibna 신규 중 자주 등장하고 정가보다 비싸게 거래되며 관심이 느는 상품입니다. 정가보다 10% 넘게 싸게 거래되는 상품은 뺍니다.'}</p>
-    </section>`;
-}
-
-function renderTrends() {
-  const { kream, musinsa } = feed.trends ?? {};
-  const now = kstNow();
-  const upcoming = feed.releases.filter((item) => item.date >= now.date && !isPast(item, now))
-    .sort((a, b) => Number(b.watched) - Number(a.watched)).slice(0, 12);
-  return `${renderSourcing()}${renderFrequent()}
-    <section class="section">
-      <div class="section-head"><h2>KREAM 소싱</h2><span>${esc(recordedLabel(kream))}</span></div>
-      <div class="controls">${chips(KREAM_VIEWS, filters.kreamView, 'kreamView')}</div>
-      <div id="results">${kreamResults()}</div>
-      <p class="hint">PC 크롬이 켜져 있으면 2시간마다 랭킹·뜨는 신상 각 50개와 급상승 상품 20개의 관심수·발매가를 읽습니다.</p>
-    </section>
-    <section class="section">
-      <div class="section-head"><h2>곧 발매 · 크림 시세 확인</h2><a href="#releases">전체 일정</a></div>
-      ${list(upcoming.map(upcomingRow), '예정된 발매가 없습니다.')}
-    </section>
-    ${renderSibnaRank()}
-    ${musinsa ? `<section class="section">
-      <div class="section-head"><h2>무신사 추천</h2><span>${esc(recordedLabel(musinsa))}</span></div>
-      ${list(musinsa.items.map(musinsaRow), '')}
-    </section>` : ''}`;
-}
-
-function renderNews() {
-  const rows = feed.news.map((item) => `
-    <a class="news-row" href="${esc(item.url)}" target="_blank" rel="noopener noreferrer">
-      <div class="news-section">${esc(item.section)}</div>
-      <div class="news-title">${esc(item.title)}</div>
-      ${item.summary ? `<div class="news-summary">${esc(item.summary)}</div>` : ''}
-    </a>`);
-  const musinsa = feed.shortcuts?.musinsa ?? [];
-  return `<section class="section">
-      <div class="section-head"><h2>오늘의 발매뉴스</h2><span>today</span></div>
-      ${list(rows, '수집된 뉴스가 없습니다.')}
-    </section>
-    <section class="section">
-      <div class="section-head"><h2>무신사</h2></div>
-      ${linkList(musinsa)}
-    </section>`;
-}
-
-function linkList(links) {
-  return `<div class="list">${links.map((link) => `
-    <a class="link-row" href="${esc(link.url)}" target="_blank" rel="noopener noreferrer">${esc(link.label)}<span>열기 ↗</span></a>`).join('')}</div>`;
-}
-
-function renderLinks() {
+function renderMore() {
   const shortcuts = feed.shortcuts ?? {};
-  const accounts = (shortcuts.instagramAccounts ?? []).map((handle) => ({
-    label: `@${handle}`,
-    url: `https://www.instagram.com/${encodeURIComponent(handle)}/`,
-  }));
-  const tags = (shortcuts.instagramTags ?? []).map((tag) => ({
-    label: `#${tag}`,
-    url: `https://www.instagram.com/explore/tags/${encodeURIComponent(tag)}/`,
-  }));
-  const status = (feed.sources ?? []).map((source) => (
-    `<div class="${source.ok ? '' : 'bad'}">${esc(source.name)}: ${source.ok ? '정상' : '수집 실패, 이전 데이터 표시 중'}</div>`
-  )).join('');
-  const appLink = feed.repo
-    ? linkList([{ label: '안드로이드 앱 받기 (알림용)', url: `https://github.com/${feed.repo}/releases/latest/download/deal-radar.apk` }])
-    : '';
-
-  return `${appLink ? `<section class="section">
-      <div class="section-head"><h2>앱</h2></div>
-      ${appLink}
-    </section>` : ''}
-    <section class="section">
-      <div class="section-head"><h2>인스타그램</h2></div>
-      ${linkList([...accounts, ...tags])}
-      ${accounts.length ? '' : '<p class="hint">자주 보는 계정을 config.json에 넣으면 여기에 나타납니다.</p>'}
-    </section>
-    <section class="section">
-      <div class="section-head"><h2>무신사</h2></div>
-      ${linkList(shortcuts.musinsa ?? [])}
-    </section>
-    <section class="section">
-      <div class="section-head"><h2>원본 사이트</h2></div>
-      ${linkList(shortcuts.sources ?? [])}
-    </section>
-    <section class="section">
-      <div class="section-head"><h2>수집 상태</h2></div>
-      <div class="status">${status}</div>
-    </section>`;
+  const news = (feed.news ?? []).map((item) => `<a class="news" href="${esc(item.url)}" target="_blank" rel="noopener noreferrer">
+      <div class="k">${esc(item.section)}</div><div class="t">${esc(item.title)}</div>${item.summary ? `<div class="s">${esc(item.summary)}</div>` : ''}
+    </a>`);
+  const insta = [
+    ...(shortcuts.instagramAccounts ?? []).map((h) => ({ label: `@${h}`, url: `https://www.instagram.com/${encodeURIComponent(h)}/` })),
+    ...(shortcuts.instagramTags ?? []).map((tag) => ({ label: `#${tag}`, url: `https://www.instagram.com/explore/tags/${encodeURIComponent(tag)}/` })),
+  ];
+  const status = (feed.sources ?? []).map((s) => `<div class="${s.ok ? '' : 'bad'}">${esc(s.name)}: ${s.ok ? '정상' : '수집 실패, 이전 데이터 표시 중'}</div>`).join('');
+  const app = feed.repo ? [{ label: '안드로이드 앱 받기 (알림용)', url: `https://github.com/${feed.repo}/releases/latest/download/deal-radar.apk` }] : [];
+  const left = block('오늘의 발매뉴스', `<div class="rows">${news.join('') || '<p class="empty">수집된 뉴스가 없습니다.</p>'}</div>`);
+  const right = block('바로가기', linkRows([...app, ...(shortcuts.musinsa ?? []), ...(shortcuts.sources ?? [])]))
+    + (insta.length ? block('인스타그램', linkRows(insta)) : '')
+    + block('수집 상태', `<div class="rows status">${status}</div>`);
+  return `<div class="grid2"><div>${left}</div><div>${right}</div></div>`;
 }
 
-const RENDERERS = { today: renderToday, trends: renderTrends, releases: renderReleases, deals: renderDeals, news: renderNews, links: renderLinks };
+// ── 그리기·이벤트 ─────────────────────────────
+
+const RENDERERS = { today: renderToday, trends: renderTrends, releases: renderReleases, deals: renderDeals, more: renderMore };
 
 function currentTab() {
   const hash = location.hash.slice(1);
-  return TABS.includes(hash) ? hash : 'today';
+  const tab = ALIASES[hash] ?? hash;
+  return TABS.includes(tab) ? tab : 'today';
+}
+
+function bindThumbs(root) {
+  root.querySelectorAll('[data-thumb]').forEach((img) => {
+    img.addEventListener('error', () => img.removeAttribute('src'), { once: true });
+  });
 }
 
 function render() {
@@ -467,57 +363,62 @@ function render() {
     else link.removeAttribute('aria-current');
   });
   if (!feed) return;
+  // 다시 그려도 펼쳐 둔 줄은 유지한다.
+  const opened = [...view.querySelectorAll('details[open] .name')].map((el) => el.textContent);
   view.innerHTML = RENDERERS[tab]();
+  view.querySelectorAll('details .name').forEach((el) => {
+    if (opened.includes(el.textContent)) el.closest('details').open = true;
+  });
   bindThumbs(view);
 }
 
-function bindThumbs(root) {
-  root.querySelectorAll('[data-thumb]').forEach((img) => {
-    img.addEventListener('error', () => img.removeAttribute('src'), { once: true });
-  });
-}
-
+/** 검색 입력은 결과 칸만 바꿔 커서를 잃지 않게 한다. */
 function renderResults() {
-  // 소싱 탭은 버튼 묶음이 여러 개라 탭 전체를 다시 그린다.
-  if (currentTab() === 'trends') {
-    render();
-    return;
-  }
   const box = document.getElementById('results');
-  if (!box) return;
-  const results = { releases: releaseResults, deals: dealResults, trends: kreamResults };
-  box.innerHTML = results[currentTab()]();
-  bindThumbs(box);
+  const fresh = document.createElement('div');
+  fresh.innerHTML = RENDERERS[currentTab()]();
+  const next = fresh.querySelector('#results');
+  if (box && next) {
+    box.replaceWith(next);
+    bindThumbs(next);
+  }
 }
 
 view.addEventListener('input', (event) => {
   const name = event.target.dataset?.search;
   if (!name) return;
-  filters[name] = event.target.value.trim();
+  state[name] = event.target.value.trim();
   renderResults();
 });
 
 view.addEventListener('click', (event) => {
-  const chip = event.target.closest('[data-filter]');
-  if (!chip) return;
-  filters[chip.dataset.filter] = chip.dataset.value;
-  chip.parentElement.querySelectorAll('[data-filter]').forEach((el) => {
-    el.setAttribute('aria-pressed', String(el === chip));
-  });
-  renderResults();
+  const set = event.target.closest('[data-set]');
+  if (set) {
+    state[set.dataset.set] = set.dataset.value;
+    render();
+    return;
+  }
+  const more = event.target.closest('[data-more]');
+  if (more) {
+    state.open.add(more.dataset.more);
+    render();
+    return;
+  }
+  const goto = event.target.closest('[data-goto]');
+  if (goto) {
+    state.src = goto.dataset.goto;
+    if (goto.dataset.rec) state.rec = goto.dataset.rec;
+    location.hash = 'trends';
+  }
 });
 
 function renderHeader() {
   document.title = feed.siteName ?? '딜레이더';
   updated.textContent = `${relativeTime(feed.generatedAt)} 갱신`;
-
   const problems = [];
-  if (Date.now() - Date.parse(feed.generatedAt) > STALE_MS) {
-    problems.push('자동 갱신이 2시간 넘게 멈춰 있습니다.');
-  }
-  const failed = (feed.sources ?? []).filter((source) => !source.ok).map((source) => source.name);
+  if (Date.now() - Date.parse(feed.generatedAt) > STALE_MS) problems.push('자동 갱신이 2시간 넘게 멈춰 있습니다.');
+  const failed = (feed.sources ?? []).filter((s) => !s.ok).map((s) => s.name);
   if (failed.length) problems.push(`${failed.join(', ')} 수집에 실패해 이전 데이터를 보여줍니다.`);
-
   alertBox.hidden = problems.length === 0;
   alertBox.textContent = problems.join(' ');
 }

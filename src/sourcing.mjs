@@ -9,6 +9,8 @@ const BRANDS = {
   hoka: ['호카', 'hoka'], onitsuka: ['오니츠카', 'onitsuka'], arcteryx: ['아크테릭스', "arc'teryx", 'arcteryx'],
   pokemon: ['포켓몬', 'pokemon'], lego: ['레고', 'lego'], carhartt: ['칼하트', '카하트', 'carhartt'],
   'new era': ['뉴에라', 'new era', 'new-era'], ugg: ['어그', 'ugg'], 'matin kim': ['마뗑킴', 'matin kim'],
+  spao: ['스파오', 'spao'], 'musinsa standard': ['무신사 스탠다드', 'musinsa standard'], jansport: ['잔스포츠', 'jansport'],
+  'black yak': ['블랙야크', 'black yak'], uniqlo: ['유니클로', 'uniqlo'], crocs: ['크록스', 'crocs'],
   apple: ['애플', 'apple'], umbro: ['엄브로', 'umbro'], montbell: ['몽벨', 'montbell'], iab: ['아이앱', 'iab studio'],
 };
 const STOP = new Set(['발매', '출시', '오픈', '응모', '선착순', '드롭', 'drop', '신상', '컬렉션', 'collection', '한정', '국내', '정식', '제품', '-', 'x', '×']);
@@ -54,6 +56,8 @@ export function hotProducts(trends) {
       premium: Number.isFinite(item.premiumPct) ? item.premiumPct : byId.get(id)?.premium,
       wishDelta: item.wishDelta ?? byId.get(id)?.wishDelta ?? null,
       releaseDate: item.releaseDate ?? byId.get(id)?.releaseDate ?? null,
+      ...(Number.isFinite(item.trades) ? { trades: item.trades } : {}),
+      ...(item.rank && kream.ranking.includes(item) ? { kreamRank: item.rank } : {}),
     });
   }
   (kream?.fresh ?? []).forEach((item, index) => put(item.id.replace(/^kream:/, ''), { freshRank: index + 1 }));
@@ -92,15 +96,91 @@ export function recommendProducts(hot, now = new Date(), limit = 15) {
         reasons.push(`정가 대비 ${pct(item.premium)}`);
       }
       if (item.wishDelta > 0) { score += Math.min(item.wishDelta / 200, 3); reasons.push(`관심 +${item.wishDelta.toLocaleString('ko-KR')}`); }
-      return {
-        id: item.id, name: item.name, image: item.image ?? null, price: item.price ?? null,
-        score: Math.round(score * 10) / 10, reasons,
-        links: searchLinks(item.name, { kreamUrl: `https://kream.co.kr/products/${item.id}` }),
-      };
+      return productRec(item, score, reasons);
     })
     .filter((item) => item.score > 0)
     .sort((a, b) => b.score - a.score)
     .slice(0, limit);
+}
+
+function productRec(item, score, reasons) {
+  return {
+    id: item.id, name: item.name, image: item.image ?? null, price: item.price ?? null,
+    premium: Number.isFinite(item.premium) ? Math.round(item.premium * 10) / 10 : null,
+    trades: item.trades ?? null, releaseDate: item.releaseDate ?? null,
+    score: Math.round(score * 10) / 10, reasons,
+    links: searchLinks(item.name, { kreamUrl: `https://kream.co.kr/products/${item.id}` }),
+    where: whereToBuy(item.name, brandOf(`${item.brand ?? ''} ${item.name}`)),
+  };
+}
+
+// 공식몰 검색 주소. 확인된 곳만 넣고 나머지는 지도·검색으로 안내한다.
+const OFFICIAL_SEARCH = {
+  nike: (q) => `https://www.nike.com/kr/w?q=${q}`,
+  jordan: (q) => `https://www.nike.com/kr/w?q=${q}`,
+  adidas: (q) => `https://www.adidas.co.kr/search?q=${q}`,
+  spao: (q) => `https://spao.com/product/search.html?keyword=${q}`,
+  'musinsa standard': (q) => `https://www.musinsa.com/search/goods?keyword=${q}`,
+};
+const BRAND_KO = Object.fromEntries(Object.entries(BRANDS).map(([key, names]) => [key, names[0]]));
+
+/** 발매가 지났거나 품절일 때 구해 볼 곳. 재고가 있는지는 확인하지 않는다. */
+export function whereToBuy(name, brand) {
+  const q = encodeURIComponent(searchQuery(name));
+  const brandName = brand ? BRAND_KO[brand] : '';
+  return [
+    ...(brand && OFFICIAL_SEARCH[brand] ? [{ label: '공식몰', url: OFFICIAL_SEARCH[brand](q) }] : []),
+    ...(brandName ? [{ label: '매장 찾기', url: `https://map.naver.com/p/search/${encodeURIComponent(`${brandName} 매장`)}` }] : []),
+    { label: '재입고 소식', url: `https://www.google.com/search?q=${q}%20%EC%9E%AC%EC%9E%85%EA%B3%A0` },
+    { label: '번개장터', url: `https://m.bunjang.co.kr/search/products?q=${q}` },
+  ];
+}
+
+const RESTOCK = /재입고|리스탁|restock|재발매|재판매|추가\s*발매/i;
+
+/** sibna 발매 글 중 재입고·재발매 글이 이 상품(또는 같은 브랜드의 같은 모델)을 가리키면 돌려준다. */
+export function findRestock(name, releases) {
+  const brand = brandOf(name);
+  const want = tokens(searchQuery(name)).filter((word) => brandOf(word) !== brand);
+  for (const release of releases) {
+    if (!RESTOCK.test(release.title)) continue;
+    if (brand && brandOf(release.title) !== brand) continue;
+    const have = new Set(tokens(release.title));
+    const overlap = want.filter((word) => have.has(word)).length;
+    if (overlap >= 2 || (overlap >= 1 && want.length <= 2)) {
+      return { title: release.title, date: release.date, time: release.time ?? '', url: release.url };
+    }
+  }
+  return null;
+}
+
+/** 싸고(기본 6만 원 이하) 자주 뜨며 거래가 많은 상품. 많이 사서 돌리기 좋은 것. */
+export function recommendBudget(hot, { maxPrice = 60000, limit = 15 } = {}) {
+  return hot
+    .filter((item) => Number.isFinite(item.price) && item.price > 0 && item.price <= maxPrice)
+    .filter((item) => !(item.premium <= -40))
+    .map((item) => {
+      const reasons = [];
+      let score = 0;
+      if (item.hits) { score += Math.min(item.hits, 6); reasons.push(`7일 중 ${item.days}일 · ${item.hits}회 등장`); }
+      if (item.trades) { score += Math.min(item.trades / 1000, 5); reasons.push(`누적 거래 ${item.trades.toLocaleString('ko-KR')}`); }
+      if (item.kreamRank) { score += item.kreamRank <= 10 ? 3 : item.kreamRank <= 30 ? 1.5 : 0.5; reasons.push(`크림 랭킹 ${item.kreamRank}위`); }
+      if (item.freshRank) { score += 1; reasons.push(`뜨는 신상 ${item.freshRank}위`); }
+      if (Number.isFinite(item.premium)) {
+        score += item.premium > 0 ? Math.min(item.premium / 10, 3) : 0;
+        reasons.push(`정가 대비 ${pct(item.premium)}`);
+      }
+      return productRec(item, score, reasons);
+    })
+    .filter((item) => item.score >= 2)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, limit);
+}
+
+/** 이미 발매된 추천 상품에 리스탁 소식을 붙인다. */
+export function attachRestock(items, releases) {
+  for (const item of items) item.restock = findRestock(item.name, releases);
+  return items;
 }
 
 /** 이름에 겹치는 낱말이 많으면 같은 상품으로 본다. 추정이라 화면에 '비슷한 상품'으로만 보여 준다. */

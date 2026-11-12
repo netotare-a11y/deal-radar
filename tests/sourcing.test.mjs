@@ -62,3 +62,39 @@ test('발매 예정 추천: 지난 발매는 빼고 뜨는 브랜드·비슷한 
   assert.ok(recs[0].reasons.includes('응모(한정 수량)'));
   assert.equal(similarProduct('완전히 다른 이름', hot), null);
 });
+
+import { attachRestock, findRestock, recommendBudget, whereToBuy } from '../src/sourcing.mjs';
+
+test('저단가 회전: 6만 원 이하, 자주 뜨고 거래가 많은 순, 정가보다 40% 넘게 싼 것은 뺀다', () => {
+  const items = [
+    { id: 's', name: 'Spao Basic Fur Fleece Zip Up Black', price: 21000, trades: 4437, kreamRank: 23 },
+    { id: 'n', name: 'Nike Stride Top', price: 58000, trades: 13000, kreamRank: 38, hits: 2, days: 1 },
+    { id: 'x', name: '비싼 자켓', price: 250000, trades: 9000, kreamRank: 1 },
+    { id: 'c', name: '너무 싼 신발', price: 30000, trades: 9000, premium: -45 },
+    { id: 'z', name: '조용한 상품', price: 10000 },
+  ];
+  const recs = recommendBudget(items, { maxPrice: 60000 });
+  assert.deepEqual(recs.map((r) => r.id), ['n', 's']);
+  assert.ok(recs[1].reasons.includes('누적 거래 4,437'));
+  assert.deepEqual(recs[1].where.map((w) => w.label), ['공식몰', '매장 찾기', '재입고 소식', '번개장터']);
+  assert.equal(recs[1].where[0].url, 'https://spao.com/product/search.html?keyword=Spao%20Basic%20Fur%20Fleece%20Zip%20Up%20Black');
+});
+
+test('구할 곳: 공식몰을 모르는 브랜드는 지도·검색만, 브랜드를 모르면 검색만', () => {
+  assert.deepEqual(whereToBuy('Salomon XT-6', 'salomon').map((w) => w.label), ['매장 찾기', '재입고 소식', '번개장터']);
+  assert.ok(whereToBuy('Salomon XT-6', 'salomon')[0].url.startsWith('https://map.naver.com/p/search/'));
+  assert.deepEqual(whereToBuy('이름 모를 상품', null).map((w) => w.label), ['재입고 소식', '번개장터']);
+});
+
+test('리스탁: 같은 브랜드의 재입고·재발매 글과 모델명이 겹치면 붙인다', () => {
+  const releases = [
+    { title: '스파오 퍼 플리스 집업 재입고', date: '2026-11-20', time: '10:00', url: 'https://sibna.kr/today/post/1' },
+    { title: '나이키 덩크 로우 재발매', date: '2026-11-21', url: 'https://sibna.kr/today/post/2' },
+    { title: '스파오 신상 발매', date: '2026-11-22', url: 'https://sibna.kr/today/post/3' },
+  ];
+  assert.equal(findRestock('스파오 퍼 플리스 집업 블랙', releases)?.url, 'https://sibna.kr/today/post/1');
+  assert.equal(findRestock('Nike Dunk Low Black', releases), null); // 영문·한글 모델명은 짝짓지 않는다
+  assert.equal(findRestock('아디다스 삼바', releases), null);
+  const [item] = attachRestock([{ name: '나이키 덩크 로우 블랙' }], releases);
+  assert.equal(item.restock.date, '2026-11-21');
+});

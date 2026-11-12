@@ -17,6 +17,7 @@
     "morningDigest": true,
     "maxIndividualAlerts": 3
   },
+  "sourcing": { "maxPrice": 60000, "limit": 15 },
   "kreamAlerts": { "wishDelta": 300, "rankRise": 10, "premiumPct": 30, "freshTop": 5 },
   "shortcuts": {
     "musinsa": [
