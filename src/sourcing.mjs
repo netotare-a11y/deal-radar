@@ -217,9 +217,8 @@ export function similarProduct(title, hot) {
   return best?.item ?? null;
 }
 
-/** 다가올 발매 중 크림·sibna 흐름으로 볼 때 노려 볼 만한 것. */
-export function recommendReleases(releases, hot, now = new Date(), limit = 12) {
-  const { date: today, time } = kst(now);
+/** 브랜드별로 지금 뜨는 상품 수와 그중 웃돈 붙은 상품 수. */
+export function brandHeat(hot) {
   const heat = new Map();
   for (const item of hot) {
     const brand = brandOf(`${item.brand ?? ''} ${item.name}`);
@@ -229,6 +228,13 @@ export function recommendReleases(releases, hot, now = new Date(), limit = 12) {
     if (item.premium > 0) h.premium += 1;
     heat.set(brand, h);
   }
+  return heat;
+}
+
+/** 다가올 발매 중 크림·sibna 흐름으로 볼 때 노려 볼 만한 것. */
+export function recommendReleases(releases, hot, now = new Date(), limit = 12) {
+  const { date: today, time } = kst(now);
+  const heat = brandHeat(hot);
 
   return releases
     .filter((item) => item.date > today || (item.date === today && (!item.time || item.time >= time)))

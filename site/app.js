@@ -12,7 +12,7 @@ const alertBox = document.getElementById('alert');
 let feed = null;
 const state = {
   releaseQuery: '', releaseMethod: '전체', dealQuery: '', dealCategory: '전체',
-  src: '추천', rec: '발매 예정', freq: '7일', kream: '순위 급상승', sibna: '거래 활발',
+  src: '추천', rec: '뉴스 픽', freq: '7일', kream: '순위 급상승', sibna: '거래 활발',
   open: new Set(), // '더 보기'로 펼친 목록
 };
 
@@ -177,6 +177,28 @@ function recRow(item, index) {
   });
 }
 
+/** sibna 발매뉴스에서 고른 '꼭 살 것' 한 줄. 이유를 문장으로 펼쳐 보여 준다. */
+function newsRow(item, index) {
+  const right = item.date
+    ? `<div class="price">${esc(md(item.date))} ${esc(item.time)}</div><div class="sig ${item.method === '응모' ? 'up' : 'mute'}">${esc(item.method)}</div>`
+    : (item.method ? `<div class="sig mute">${esc(item.method)}</div>` : '');
+  const stores = (item.storeLinks ?? []).map((l) => ({ label: `발매처 ${l.label}`, url: l.url, primary: true }));
+  const buy = [...stores, ...(item.postUrl ? [{ label: '발매 정보', url: item.postUrl }] : []), { label: '기사 원문', url: item.newsUrl }, ...item.links];
+  // 한 줄 요약에는 숫자 근거(웃돈 %)를 먼저 보여 준다.
+  const lead = item.reasons.find((r) => r.includes('%')) ?? item.reasons[0] ?? item.summary;
+  return expandable({
+    num: index + 1,
+    image: item.image,
+    name: item.name,
+    sub: esc(lead),
+    right,
+    drawer: `<p class="note">${esc(item.summary)}</p>
+      <ul class="reasons">${item.reasons.map((r) => `<li>${esc(r)}</li>`).join('')}</ul>
+      ${item.cautions.length ? `<ul class="reasons cautions">${item.cautions.map((r) => `<li>${esc(r)}</li>`).join('')}</ul>` : ''}
+      ${linkGroup('사러 가기', buy)}`,
+  });
+}
+
 function kreamRow(item) {
   const signal = item.wishDelta > 0 ? `<div class="sig up">관심 +${item.wishDelta.toLocaleString('ko-KR')}</div>`
     : item.isNewRank || item.enteredRanking ? '<div class="sig up">신규</div>'
@@ -249,7 +271,9 @@ function renderToday() {
     + block('곧 발매', rows(later.slice(0, 4), (item) => releaseRow(item, now, { showDate: true }), { empty: '예정된 발매가 없습니다.' }),
       { aside: '<a href="#releases">더 보기 →</a>' });
 
-  const right = block('노려 볼 발매', rows((sourcing.releases ?? []).slice(0, 4), recRow, { empty: '추천할 발매가 아직 없습니다.' }), { aside: goto('추천', '발매 예정', '전체') })
+  const newsHead = sourcing.newsDate ? `${md(sourcing.newsDate)} sibna 발매뉴스 기준` : '';
+  const right = block('오늘의 알짜 픽', rows(sourcing.news ?? [], newsRow, { empty: '오늘 기사에서 꼭 살 만한 것을 찾지 못했어요.' }), { count: newsHead, aside: goto('추천', '뉴스 픽', '전체') })
+    + block('노려 볼 발매', rows((sourcing.releases ?? []).slice(0, 4), recRow, { empty: '추천할 발매가 아직 없습니다.' }), { aside: goto('추천', '발매 예정', '전체') })
     + block('지금 뜨는 신상', rows((sourcing.products ?? []).slice(0, 4), recRow, { empty: '추천할 신상품이 아직 없습니다.' }), { aside: goto('추천', '신상품', '전체') })
     + block('저단가 회전', rows((sourcing.budget ?? []).slice(0, 3), recRow, { empty: '조건에 맞는 상품이 아직 없습니다.' }), { aside: goto('저단가', '', '전체') })
     + block('인기 핫딜', rows(hot.slice(0, 5), dealRow, { empty: '아직 추천이 쌓인 핫딜이 없습니다.' }), { aside: '<a href="#deals">전체 →</a>' });
@@ -267,8 +291,13 @@ function sourcingBody() {
   const t = feed.trends ?? {};
   const s = t.sourcing ?? {};
   if (state.src === '추천') {
+    if (state.rec === '뉴스 픽') {
+      return `${seg(['뉴스 픽', '발매 예정', '신상품'], state.rec, 'rec', 'subseg')}
+        ${rows(s.news ?? [], newsRow, { empty: '오늘 기사에서 꼭 살 만한 것을 찾지 못했어요.' })}
+        <p class="foot">${s.newsUrl ? ext(s.newsUrl, `${md(s.newsDate)} sibna 발매뉴스 ↗`, '') : ''} · 기사 속 해외·크림 시세 근거, 응모·협업 여부, sibna의 '꼭 볼 것', 딜레이더의 크림 데이터를 합쳐 고릅니다. 브랜드 인기만으로는 넣지 않아요.</p>`;
+    }
     const isRelease = state.rec === '발매 예정';
-    return `${seg(['발매 예정', '신상품'], state.rec, 'rec', 'subseg')}
+    return `${seg(['뉴스 픽', '발매 예정', '신상품'], state.rec, 'rec', 'subseg')}
       ${rows((isRelease ? s.releases : s.products) ?? [], recRow, { key: `rec-${state.rec}`, empty: '추천할 항목이 아직 없습니다.' })}
       <p class="foot">${isRelease
     ? '뜨는 브랜드, 이름이 비슷한 크림 상품의 웃돈, 관심 키워드, 응모 여부로 점수를 매깁니다. 줄을 누르면 발매처와 검색 버튼이 나옵니다.'

@@ -7,6 +7,7 @@ import { collectRuliweb } from './sources/ruliweb.mjs';
 import { collectSibna } from './sources/sibna.mjs';
 import { collectSibnaKream } from './sources/sibnaKream.mjs';
 import { attachNaverRestock } from './sources/naverRestock.mjs';
+import { collectSibnaNews, pickNews } from './sources/sibnaNews.mjs';
 import { kreamAlerts, loadTrends } from './trends.mjs';
 import {
   attachRestock, attachStoreLinks, hotProducts, recommendBudget, recommendProducts, recommendReleases,
@@ -56,10 +57,11 @@ async function main() {
   const now = new Date();
 
   const previous = await loadPreviousFeed(siteUrl);
-  const [ruliweb, sibna, sibnaKream] = await Promise.all([
+  const [ruliweb, sibna, sibnaKream, sibnaNews] = await Promise.all([
     runSource('ruliweb', '루리웹 핫딜', () => collectRuliweb(now)),
     runSource('sibna', 'today 발매정보', () => collectSibna(config, now)),
     runSource('sibnaKream', 'today 크림 랭킹', () => collectSibnaKream(previous?.sibnaKream, now)),
+    runSource('sibnaNews', 'today 발매뉴스', () => collectSibnaNews(previous?.sibnaNews, now)),
   ]);
 
   if (!sibna.data && !ruliweb.data && !previous) {
@@ -80,7 +82,17 @@ async function main() {
     products: attachRestock(recommendProducts(hot, now), releasesOut),
     budget: attachRestock(recommendBudget(hot, config.sourcing), releasesOut),
   };
-  const storeLinks = await attachStoreLinks(sourcing.releases, { ...previous?.storeLinks });
+  // sibna 발매뉴스에서 꼭 살 만한 것. 기사는 3시간마다 받고, 고르기는 매번 최신 크림 흐름으로 다시 한다.
+  const sibnaNewsData = sibnaNews.data ?? previous?.sibnaNews ?? null;
+  sourcing.news = sibnaNewsData
+    ? pickNews(sibnaNewsData.items, { hot, releases: releasesOut, watchKeywords: config.watchKeywords, url: sibnaNewsData.url })
+    : [];
+  sourcing.newsDate = sibnaNewsData?.date ?? null;
+  sourcing.newsUrl = sibnaNewsData?.url ?? null;
+  const storeLinks = await attachStoreLinks(
+    [...sourcing.releases, ...sourcing.news.filter((pick) => pick.postUrl)],
+    { ...previous?.storeLinks },
+  );
 
   // 이미 발매된 추천 상품의 재입고 소식(네이버 블로그·카페). 키가 없으면 건너뛴다.
   // 윈도우 PowerShell로 넣은 비밀값은 앞에 BOM(﻿)이 붙어 있을 수 있어 떼어 낸다.
@@ -103,7 +115,7 @@ async function main() {
     siteName: config.siteName,
     generatedAt: now.toISOString(),
     repo: process.env.GITHUB_REPOSITORY ?? '',
-    sources: [ruliweb.status, sibna.status, sibnaKream.status, ...(naverCreds ? [naver.status] : [])],
+    sources: [ruliweb.status, sibna.status, sibnaKream.status, sibnaNews.status, ...(naverCreds ? [naver.status] : [])],
     // alert 는 안드로이드 앱이 알림을 띄울지 판단하는 값이다.
     releases: releasesOut,
     // KREAM 소싱 알림은 앱이 이미 읽는 deals 에 실어 보내고, 사이트 핫딜 목록에서는 뺀다.
@@ -115,6 +127,7 @@ async function main() {
     trends,
     // 다음 실행이 날짜별 기록을 이어 가도록 원본을 남긴다.
     sibnaKream: sibnaKreamData,
+    sibnaNews: sibnaNewsData,
     // 발매 글에서 읽은 발매처 링크. 다음 실행 때 같은 글을 다시 요청하지 않게 남긴다.
     storeLinks,
     restockNews,
