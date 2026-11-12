@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { safeUrl } from './lib/util.mjs';
+import { sizeAdvice } from './sizes.mjs';
 
 const MIN_BASELINE_AGE_MS = 60 * 60 * 1000;
 const DAY_BASELINE_AGE_MS = 20 * 60 * 60 * 1000;
@@ -48,6 +49,7 @@ export function detailStats(detail, price) {
     premiumPct,
     changePct: detail.changePct ?? null,
     badge: String(detail.badge ?? ''),
+    fit: sizeAdvice(detail.name, detail.tradeLog),
     ...(Number.isFinite(detail.price) ? { price: detail.price } : {}),
   };
 }
@@ -107,6 +109,10 @@ export function buildKreamTrend(file) {
     baselineAt: baseline?.at ?? null,
     freshAt: file.freshAt ?? null,
     verified,
+    // 상품별 성별 인기·추천 사이즈(체결 거래 기준).
+    fits: Object.fromEntries(Object.entries(details)
+      .map(([id, d]) => [id, sizeAdvice(d.name, d.tradeLog)])
+      .filter(([, fit]) => fit)),
     fresh,
     wishRisers: all
       .filter((item) => item.wishDelta > 0)

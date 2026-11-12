@@ -1,5 +1,6 @@
 import { brandHeat, brandOf, searchLinks, similarProduct } from '../sourcing.mjs';
 import { addDays, fetchText, kst, matchesAny, stripTags } from '../lib/util.mjs';
+import { sizeAdvice } from '../sizes.mjs';
 
 const BASE = 'https://sibna.kr/today/news';
 const REFETCH_MS = 3 * 60 * 60 * 1000;
@@ -113,6 +114,7 @@ export function pickNews(items, { hot = [], releases = [], watchKeywords = [], u
       score: Math.round(score * 10) / 10,
       strong,
       reasons, cautions,
+      fit: similar?.fit?.basis === 'trades' ? { ...similar.fit, from: similar.name } : sizeAdvice(c.title, []),
       links: searchLinks(c.title),
     };
   });

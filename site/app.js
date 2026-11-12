@@ -169,16 +169,34 @@ function recRow(item, index) {
     num: index + 1,
     image: item.image,
     name: item.name,
-    sub: `${item.collab?.length ? `<b>협업 ${esc(item.collab[0].label.split(' (')[0])}</b> · ` : ''}${item.restock || posts.length ? '<b class="up">재입고 소식</b> · ' : ''}${esc(item.reasons[0] ?? '')}`,
+    sub: `${genderTag(item.fit)}${item.collab?.length ? `<b>협업 ${esc(item.collab[0].label.split(' (')[0])}</b> · ` : ''}${item.restock || posts.length ? '<b class="up">재입고 소식</b> · ' : ''}${esc(item.reasons[0] ?? '')}`,
     right,
-    drawer: `${why(item.reasons)}${similar}${restock}${naver}${collabBlock(item.collab)}
+    drawer: `${why(item.reasons)}${similar}${restock}${naver}${collabBlock(item.collab)}${fitBlock(item.fit)}
       ${linkGroup(isRelease ? '사러 가기' : '크림·검색', buy)}
       ${linkGroup(released ? '발매 지남·구할 곳' : '구할 곳', item.where)}`,
   });
 }
 
-/** 협업 상품이면 협업 상대가 누구인지, 왜 살 만한지, 지금 시장 근거를 보여 준다. */
-function collabBlock(collab) {
+const GENDER = { men: '남성 인기', women: '여성 인기', both: '남녀 고루' };
+const genderTag = (fit) => (fit?.gender && fit.basis === 'trades' ? `<b>${GENDER[fit.gender.side]}</b> · ` : '');
+
+/** 신발이면 남성·여성 중 어디서 인기인지와 추천 사이즈, 옷이면 많이 팔린 사이즈. */
+function fitBlock(fit) {
+  if (!fit) return '';
+  const chip = (r) => `<span class="size">${esc(r.size)}${r.n ? `<small>${r.n}건${Number.isFinite(r.vsAvg) && r.vsAvg ? ` · ${r.vsAvg > 0 ? '+' : ''}${r.vsAvg}%` : ''}</small>` : ''}</span>`;
+  const basis = fit.basis === 'trades'
+    ? `최근 크림 체결 ${fit.n}건 기준${fit.from ? ` (비슷한 상품: ${esc(fit.from)})` : ''}`
+    : '일반 기준';
+  return `<div class="fit">
+      <div class="collab-head">${fit.kind === 'shoe' ? '사이즈 · 성별' : '사이즈'} <span class="mute">${basis}</span></div>
+      ${fit.gender ? `<p>${esc(fit.gender.text)}</p>` : ''}
+      <div class="sizes"><span class="lab">추천 사이즈</span>${fit.recommend.map(chip).join('')}</div>
+      ${fit.pricey?.length ? `<div class="sizes"><span class="lab">비싸게 팔림</span>${fit.pricey.map(chip).join('')}</div>` : ''}
+      <p class="mute">${esc(fit.note)}</p>
+    </div>`;
+}
+
+/** 협업 상품이면 협업 상대가 누구인지, 왜 살 만한지, 지금 시장 근거를 보여 준다. */function collabBlock(collab) {
   if (!collab?.length) return '';
   return collab.map((c) => `<div class="collab">
       <div class="collab-head">협업 · ${esc(c.label)}</div>
@@ -204,7 +222,7 @@ function collabBlock(collab) {
     drawer: `<p class="note">${esc(item.summary)}</p>
       <ul class="reasons">${item.reasons.map((r) => `<li>${esc(r)}</li>`).join('')}</ul>
       ${item.cautions.length ? `<ul class="reasons cautions">${item.cautions.map((r) => `<li>${esc(r)}</li>`).join('')}</ul>` : ''}
-      ${collabBlock(item.collab)}
+      ${collabBlock(item.collab)}${fitBlock(item.fit)}
       ${linkGroup('사러 가기', buy)}`,
   });
 }
@@ -226,9 +244,9 @@ function kreamRow(item) {
     num: item.rank ?? '',
     image: item.image,
     name: item.name,
-    sub: esc(facts.slice(0, 2).join(' · ')),
+    sub: `${genderTag(item.fit)}${esc(facts.slice(0, 2).join(' · '))}`,
     right: `<div class="price">${esc(won(item.price))}</div>${signal}`,
-    drawer: `${why(facts)}${linkGroup('바로가기', productLinks(id, item.name))}`,
+    drawer: `${why(facts)}${fitBlock(item.fit)}${linkGroup('바로가기', productLinks(id, item.name))}`,
   });
 }
 

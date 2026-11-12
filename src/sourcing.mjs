@@ -1,4 +1,5 @@
 import { decodeEntities, fetchText, kst, safeUrl, sleep, stripTags } from './lib/util.mjs';
+import { sizeAdvice } from './sizes.mjs';
 
 // 발매 글은 한글 브랜드명, 크림·sibna 상품은 영문 브랜드명이 섞여 있어 둘을 이어 준다.
 const BRANDS = {
@@ -58,6 +59,7 @@ export function hotProducts(trends) {
       premium: Number.isFinite(item.premiumPct) ? item.premiumPct : byId.get(id)?.premium,
       wishDelta: item.wishDelta ?? byId.get(id)?.wishDelta ?? null,
       releaseDate: item.releaseDate ?? byId.get(id)?.releaseDate ?? null,
+      fit: item.fit ?? byId.get(id)?.fit ?? null,
       ...(Number.isFinite(item.trades) ? { trades: item.trades } : {}),
       ...(item.rank && kream.ranking.includes(item) ? { kreamRank: item.rank } : {}),
     });
@@ -77,7 +79,8 @@ export function hotProducts(trends) {
     put(row.id, { id: row.id, name: byId.get(row.id)?.name ?? row.name, image: byId.get(row.id)?.image ?? row.image, hits: row.hits, days: row.days });
   }
   const verified = kream?.verified ?? {};
-  return [...byId.values()].filter((item) => item.name).map((item) => {
+  const fits = kream?.fits ?? {};
+  return [...byId.values()].filter((item) => item.name).map((item) => ({ ...item, fit: item.fit ?? fits[item.id] ?? null })).map((item) => {
     if (Number.isFinite(item.premium)) return { ...item, premiumSource: 'kream' };
     const v = verified[item.id];
     if (v) return { ...item, premium: v.premiumPct, premiumSource: 'kream', releaseDate: item.releaseDate ?? v.releaseDate };
@@ -127,6 +130,7 @@ function productRec(item, score, reasons) {
     id: item.id, name: item.name, image: item.image ?? null, price: item.price ?? null,
     premium: Number.isFinite(item.premium) ? Math.round(item.premium * 10) / 10 : null,
     premiumSource: item.premiumSource ?? null,
+    fit: item.fit ?? sizeAdvice(item.name, []),
     trades: item.trades ?? null, releaseDate: item.releaseDate ?? null,
     score: Math.round(score * 10) / 10, reasons,
     links: searchLinks(item.name, { kreamUrl: `https://kream.co.kr/products/${item.id}` }),
@@ -260,6 +264,8 @@ export function recommendReleases(releases, hot, now = new Date(), limit = 12) {
         score: Math.round(score * 10) / 10, reasons,
         similar: similar ? { name: similar.name, url: `https://kream.co.kr/products/${similar.id}`, premium: similar.premium ?? null, premiumSource: similar.premiumSource ?? null } : null,
         postUrl: item.url,
+        // 아직 크림 거래가 없는 발매라, 비슷한 크림 상품의 거래 기준이 있으면 그걸 쓰고 없으면 이름·일반 기준.
+        fit: similar?.fit?.basis === 'trades' ? { ...similar.fit, from: similar.name } : sizeAdvice(item.title, []),
         links: searchLinks(item.title),
       };
     })

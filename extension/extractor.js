@@ -164,17 +164,52 @@
     };
   }
 
+  /** '42분 전', '2시간 전', '3일 전', '26/11/10' 을 대략의 거래 시각(정시 단위)으로 바꾼다. */
+  function agoToIso(text, now = Date.now()) {
+    const hour = 3600 * 1000;
+    let at = null;
+    if (/방금/.test(text)) at = now;
+    const m = text.match(/(\d+)\s*(분|시간|일)\s*전/);
+    if (m) at = now - Number(m[1]) * { 분: 60 * 1000, 시간: hour, 일: 24 * hour }[m[2]];
+    const d = text.match(/^(\d{2})\/(\d{2})\/(\d{2})$/);
+    if (d) at = Date.parse(`20${d[1]}-${d[2]}-${d[3]}T03:00:00Z`);
+    return at === null ? null : new Date(Math.floor(at / hour) * hour).toISOString();
+  }
+
+  /**
+   * 상품 페이지의 '체결 거래' 표(옵션·거래가·거래일)를 읽는다.
+   * 예: '옵션\n거래가\n거래일\nXXL\n139,000원\n42분 전\nM\n119,000원\n2시간 전\n거래 내역 더보기'
+   */
+  function parseRecentTrades(text, now = Date.now()) {
+    const start = text.indexOf('체결 거래');
+    if (start < 0) return [];
+    const head = text.indexOf('거래일', start);
+    const end = text.indexOf('거래 내역 더보기', head);
+    if (head < 0 || end < 0) return [];
+    const lines = text.slice(head + 3, end).split('\n').map((l) => l.trim()).filter(Boolean);
+    const trades = [];
+    for (let i = 0; i + 2 < lines.length; i += 3) {
+      const [size, priceText, ago] = lines.slice(i, i + 3);
+      const price = priceText?.match(/^([\d,]+)\s*원$/)?.[1];
+      const at = ago ? agoToIso(ago, now) : null;
+      if (!price || !at) break;
+      trades.push({ size, price: Number(price.replaceAll(',', '')), at });
+    }
+    return trades;
+  }
+
   function readProduct(doc) {
     const id = doc.location.pathname.match(/^\/products\/(\d+)$/)?.[1];
     const wish = doc.querySelector(`[data-sdui-id="product_wish_count/${id}"]`);
     if (!id || !wish) return null;
     const price = doc.querySelector('.price-info-container .label-container p.bold');
     const name = doc.querySelector('meta[property="og:title"]')?.content ?? '';
-    return { id, name, ...parseProductText(doc.body.innerText, wish.textContent.trim(), price?.textContent) };
+    const text = doc.body.innerText;
+    return { id, name, ...parseProductText(text, wish.textContent.trim(), price?.textContent), recentTrades: parseRecentTrades(text) };
   }
 
   globalThis.DealRadarExtractor = {
     detectSite, parseCount, parseCardLines, parseKreamLines, parseMusinsaLines, readCards, buildDiagnostic,
-    parseProductText, readProduct,
+    parseProductText, readProduct, parseRecentTrades, agoToIso,
   };
 })();

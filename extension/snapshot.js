@@ -20,6 +20,24 @@
     };
   }
 
+  // 기록 파일이 GitHub 내용 API 한도(1MB)를 넘지 않게 상품당 60건, [사이즈, 가격, 시각]으로 줄여 둔다.
+  const MAX_TRADES = 60;
+  const TRADE_KEEP_MS = 30 * 24 * 60 * 60 * 1000;
+
+  /**
+   * 페이지에는 최근 체결 5건만 보여 방문할 때마다 쌓는다.
+   * 거래 시각이 '2시간 전'처럼 대략이라 사이즈·가격·정시가 같으면 같은 거래로 본다.
+   */
+  function mergeTrades(old = [], fresh = [], nowIso) {
+    const now = Date.parse(nowIso);
+    const seen = new Map();
+    const rows = [...old, ...(fresh ?? []).map((t) => [t.size, t.price, t.at])];
+    for (const [size, price, at] of rows) {
+      if (!size || !Number.isFinite(price) || !(now - Date.parse(at) <= TRADE_KEEP_MS)) continue;
+      seen.set(`${size}|${price}|${at}`, [size, price, at]);
+    }
+    return [...seen.values()].sort((a, b) => a[2].localeCompare(b[2])).slice(-MAX_TRADES);
+  }
   /** 상품 페이지 값을 상품별로 모은다. 관심수는 1시간 간격으로 쌓아 증가 속도를 계산한다. */
   function mergeDetails(previous, details, nowIso) {
     const now = Date.parse(nowIso);
@@ -27,7 +45,7 @@
     for (const [id, old] of Object.entries(previous ?? {})) {
       if (now - Date.parse(old.at) < DETAIL_KEEP_MS) merged[id] = old;
     }
-    for (const { at, ...detail } of details ?? []) {
+    for (const { at, recentTrades, ...detail } of details ?? []) {
       const old = merged[detail.id];
       const wishes = [...(old?.wishes ?? [])];
       if (Number.isFinite(detail.wish)) {
@@ -35,7 +53,12 @@
         if (last && Date.parse(at) - Date.parse(last[0]) < WISH_GAP_MS) wishes.pop();
         wishes.push([at, detail.wish]);
       }
-      merged[detail.id] = { ...old, ...detail, name: detail.name || old?.name || '', at, wishes: wishes.slice(-MAX_WISH_POINTS) };
+      merged[detail.id] = {
+        ...old, ...detail, name: detail.name || old?.name || '', at,
+        wishes: wishes.slice(-MAX_WISH_POINTS),
+        // 'trades'는 페이지의 누적 거래 수라 이름을 나눠 둔다.
+        tradeLog: mergeTrades(old?.tradeLog, recentTrades, nowIso),
+      };
     }
     return merged;
   }
@@ -68,5 +91,5 @@
     return next;
   }
 
-  globalThis.DealRadarSnapshot = { mergeSnapshot, mergeDetails, toItem };
+  globalThis.DealRadarSnapshot = { mergeSnapshot, mergeDetails, mergeTrades, toItem };
 })();
