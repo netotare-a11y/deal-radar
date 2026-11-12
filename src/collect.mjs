@@ -83,8 +83,10 @@ async function main() {
   const storeLinks = await attachStoreLinks(sourcing.releases, { ...previous?.storeLinks });
 
   // 이미 발매된 추천 상품의 재입고 소식(네이버 블로그·카페). 키가 없으면 건너뛴다.
-  const naverCreds = process.env.NAVER_SEARCH_ID && process.env.NAVER_SEARCH_SECRET
-    ? { id: process.env.NAVER_SEARCH_ID, secret: process.env.NAVER_SEARCH_SECRET } : null;
+  // 윈도우 PowerShell로 넣은 비밀값은 앞에 BOM(﻿)이 붙어 있을 수 있어 떼어 낸다.
+  const envKey = (name) => (process.env[name] ?? '').replace(/^﻿/, '').trim();
+  const naverCreds = envKey('NAVER_SEARCH_ID') && envKey('NAVER_SEARCH_SECRET')
+    ? { id: envKey('NAVER_SEARCH_ID'), secret: envKey('NAVER_SEARCH_SECRET') } : null;
   const restockTargets = [...new Map([...sourcing.products, ...sourcing.budget].map((item) => [item.id, item])).values()];
   const naver = naverCreds
     ? await runSource('naverRestock', '네이버 재입고 소식', () => attachNaverRestock(restockTargets, { ...previous?.restockNews }, naverCreds, { now }))
