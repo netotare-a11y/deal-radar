@@ -214,16 +214,44 @@ async function runCycle() {
   return result;
 }
 
+/**
+ * 폴더의 manifest 버전이 바뀌었으면(코드를 고쳤으면) 스스로 새로고침한다.
+ * 압축해제 확장은 폴더 파일을 바로 읽어서, 사용자가 chrome://extensions 에서 누르지 않아도 된다.
+ */
+async function reloadIfUpdated() {
+  try {
+    const res = await fetch(chrome.runtime.getURL('manifest.json'), { cache: 'no-store' });
+    const onDisk = (await res.json()).version;
+    if (onDisk && onDisk !== chrome.runtime.getManifest().version) {
+      chrome.runtime.reload();
+      return true;
+    }
+  } catch {
+    // 파일을 못 읽으면 지금 버전으로 계속 돈다.
+  }
+  return false;
+}
+
 chrome.runtime.onInstalled.addListener(() => {
   chrome.alarms.create('cycle', { delayInMinutes: 1, periodInMinutes: CYCLE_MINUTES });
+  chrome.alarms.create('update-check', { delayInMinutes: 1, periodInMinutes: 5 });
 });
 chrome.runtime.onStartup.addListener(async () => {
   if (!(await chrome.alarms.get('cycle'))) {
     chrome.alarms.create('cycle', { delayInMinutes: 1, periodInMinutes: CYCLE_MINUTES });
   }
+  if (!(await chrome.alarms.get('update-check'))) {
+    chrome.alarms.create('update-check', { delayInMinutes: 1, periodInMinutes: 5 });
+  }
+  reloadIfUpdated();
 });
-chrome.alarms.onAlarm.addListener((alarm) => {
-  if (alarm.name === 'cycle') runCycle();
+chrome.alarms.onAlarm.addListener(async (alarm) => {
+  if (alarm.name === 'update-check') {
+    reloadIfUpdated();
+    return;
+  }
+  // 수집 도중에 새로고침되지 않게, 시작 전에 먼저 확인한다.
+  if (alarm.name === 'cycle' && !(await reloadIfUpdated())) runCycle();
 });
 
 chrome.runtime.onMessage.addListener((message, sender, respond) => {
