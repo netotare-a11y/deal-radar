@@ -10,7 +10,7 @@ const alertBox = document.getElementById('alert');
 let feed = null;
 // KREAM 소싱 알림은 앱 알림용으로 deals 에 섞여 오므로 핫딜 목록에서는 뺀다.
 const hotDeals = () => feed.deals.filter((item) => item.kind !== 'kream');
-const filters = { releaseQuery: '', releaseMethod: '전체', dealQuery: '', dealCategory: '전체', kreamView: '순위 급상승' };
+const filters = { releaseQuery: '', releaseMethod: '전체', dealQuery: '', dealCategory: '전체', kreamView: '순위 급상승', freqDays: '7일', sibnaList: '거래 활발' };
 
 // 피드 내용은 외부 사이트에서 온 값이다. 화면에 넣을 때 항상 이스케이프한다.
 const esc = (value) => String(value ?? '').replace(/[&<>"']/g, (c) => (
@@ -275,12 +275,64 @@ function upcomingRow(item) {
   </a>`;
 }
 
+const SIBNA_LISTS = { '거래 활발': 'sales', '프리미엄': 'premium', '정가 이하': 'under', '신규': 'new' };
+
+const pct = (value) => (Number.isFinite(value) ? `${value > 0 ? '+' : ''}${value.toFixed(1)}%` : '');
+
+function frequentRow(item, index) {
+  const vs = Number.isFinite(item.vsRetail)
+    ? `<span class="delta ${item.vsRetail > 0 ? 'up' : 'down'}">정가 대비 ${esc(pct(item.vsRetail))}</span>` : '';
+  return `<a class="row" href="${esc(item.url)}" target="_blank" rel="noopener noreferrer">
+    <div class="time">${index + 1}</div>${thumb(item.image)}
+    <div class="body">
+      <div class="title">${esc(item.name)}</div>
+      <div class="meta"><span class="delta up">${item.days}일 · ${item.hits}회</span><span class="price">${esc(won(item.price))}</span>${vs}</div>
+      <div class="meta">${item.sources.map((source) => `<span class="tag">${esc(source)}</span>`).join('')}</div>
+    </div>
+  </a>`;
+}
+
+function sibnaRow(item) {
+  const vs = Number.isFinite(item.vsRetail)
+    ? `<span class="delta ${item.vsRetail > 0 ? 'up' : 'down'}">정가 대비 ${esc(pct(item.vsRetail))}</span>` : '';
+  return `<a class="row" href="${esc(item.url)}" target="_blank" rel="noopener noreferrer">
+    <div class="time">${esc(item.rank)}</div>${thumb(item.image)}
+    <div class="body">
+      <div class="title">${esc(item.name)}</div>
+      <div class="meta"><span class="price">${esc(won(item.price))}</span>${vs}${item.activity ? `<span>활발도 ${esc(item.activity)}</span>` : ''}<span>${esc(item.brand)}</span></div>
+    </div>
+  </a>`;
+}
+
+function renderFrequent() {
+  const frequent = feed.trends?.frequent;
+  const rows = frequent?.windows?.[parseInt(filters.freqDays, 10)] ?? [];
+  return `<section class="section">
+      <div class="section-head"><h2>자주 뜨는 상품</h2><span>크림 랭킹·뜨는 신상·sibna 4개 목록</span></div>
+      <div class="controls">${chips(['1일', '3일', '7일'], filters.freqDays, 'freqDays')}</div>
+      ${list(rows.map(frequentRow), '기록이 쌓이면 표시됩니다. 하루에 한 번씩 쌓입니다.')}
+      <p class="hint">"3일 · 5회"는 기간 중 3일 동안, 날짜와 목록을 합쳐 5번 나왔다는 뜻입니다. 같은 날 같은 목록은 한 번만 셉니다.</p>
+    </section>`;
+}
+
+function renderSibnaRank() {
+  const rank = feed.trends?.sibnaRank;
+  if (!rank) return '';
+  const items = rank.lists[SIBNA_LISTS[filters.sibnaList]] ?? [];
+  return `<section class="section">
+      <div class="section-head"><h2>sibna 크림 랭킹</h2><a href="https://sibna.kr/today/kream_rank" target="_blank" rel="noopener noreferrer">${esc(relativeTime(rank.fetchedAt))} 기록 ↗</a></div>
+      <div class="controls">${chips(Object.keys(SIBNA_LISTS), filters.sibnaList, 'sibnaList')}</div>
+      ${list(items.map(sibnaRow), '이 목록은 비어 있습니다.')}
+    </section>`;
+}
+
 function renderTrends() {
   const { kream, musinsa } = feed.trends ?? {};
   const now = kstNow();
   const upcoming = feed.releases.filter((item) => item.date >= now.date && !isPast(item, now))
     .sort((a, b) => Number(b.watched) - Number(a.watched)).slice(0, 12);
-  return `<section class="section">
+  return `${renderFrequent()}
+    <section class="section">
       <div class="section-head"><h2>KREAM 소싱</h2><span>${esc(recordedLabel(kream))}</span></div>
       <div class="controls">${chips(KREAM_VIEWS, filters.kreamView, 'kreamView')}</div>
       <div id="results">${kreamResults()}</div>
@@ -290,6 +342,7 @@ function renderTrends() {
       <div class="section-head"><h2>곧 발매 · 크림 시세 확인</h2><a href="#releases">전체 일정</a></div>
       ${list(upcoming.map(upcomingRow), '예정된 발매가 없습니다.')}
     </section>
+    ${renderSibnaRank()}
     ${musinsa ? `<section class="section">
       <div class="section-head"><h2>무신사 추천</h2><span>${esc(recordedLabel(musinsa))}</span></div>
       ${list(musinsa.items.map(musinsaRow), '')}
@@ -384,6 +437,11 @@ function bindThumbs(root) {
 }
 
 function renderResults() {
+  // 소싱 탭은 버튼 묶음이 여러 개라 탭 전체를 다시 그린다.
+  if (currentTab() === 'trends') {
+    render();
+    return;
+  }
   const box = document.getElementById('results');
   if (!box) return;
   const results = { releases: releaseResults, deals: dealResults, trends: kreamResults };

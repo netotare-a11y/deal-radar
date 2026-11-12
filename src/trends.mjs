@@ -170,6 +170,94 @@ export function kreamAlerts(trend, rules = {}) {
   }));
 }
 
+const SOURCE_LABELS = {
+  kream: '크림 랭킹',
+  kreamFresh: '크림 뜨는 신상',
+  'sibna:sales': 'sibna 거래 활발',
+  'sibna:premium': 'sibna 프리미엄',
+  'sibna:under': 'sibna 정가 이하',
+  'sibna:new': 'sibna 신규',
+};
+export const FREQUENT_WINDOWS = [1, 3, 7];
+const FREQUENT_LIMIT = 30;
+const kstDate = (iso) => new Date(Date.parse(iso) + 9 * 3600 * 1000).toISOString().slice(0, 10);
+
+function shiftDate(ymd, days) {
+  const d = new Date(`${ymd}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10);
+}
+
+/**
+ * 최근 1·3·7일 동안 크림 랭킹·뜨는 신상·sibna 네 목록에 자주 나온 상품.
+ * 같은 날 같은 목록은 한 번만 센다. 점수 = (날짜, 목록) 등장 횟수.
+ */
+export function buildFrequent({ kreamFile, kreamTrend, sibna, now = new Date() }) {
+  const hits = new Map();
+  const mark = (id, date, source) => {
+    const key = String(id);
+    if (!hits.has(key)) hits.set(key, { pairs: new Set(), days: new Set(), sources: new Set() });
+    const entry = hits.get(key);
+    entry.pairs.add(`${date}|${source}`);
+    entry.days.add(date);
+    entry.sources.add(source);
+  };
+  for (const entry of kreamFile?.history ?? []) {
+    const date = kstDate(entry.at);
+    for (const id of Object.keys(entry.items ?? {})) mark(id, date, 'kream');
+    for (const id of entry.fresh ?? []) mark(id, date, 'kreamFresh');
+  }
+  for (const day of sibna?.history ?? []) {
+    for (const [list, ids] of Object.entries(day.lists ?? {})) for (const id of ids) mark(id, day.date, `sibna:${list}`);
+  }
+  if (!hits.size) return null;
+
+  const kreamInfo = new Map();
+  for (const item of [...(kreamTrend?.premium ?? []), ...(kreamTrend?.wishRisers ?? []), ...(kreamTrend?.fresh ?? []), ...(kreamTrend?.ranking ?? [])]) {
+    kreamInfo.set(item.id.replace(/^kream:/, ''), item);
+  }
+
+  const today = kstDate(now.toISOString());
+  const windows = {};
+  for (const days of FREQUENT_WINDOWS) {
+    const from = shiftDate(today, -(days - 1));
+    const rows = [];
+    for (const [id, entry] of hits) {
+      const pairs = [...entry.pairs].filter((pair) => pair.slice(0, 10) >= from);
+      if (!pairs.length) continue;
+      const sources = [...new Set(pairs.map((pair) => pair.slice(11)))];
+      const k = kreamInfo.get(id);
+      const s = sibna?.products?.[id];
+      const name = s?.name || k?.name;
+      if (!name) continue;
+      rows.push({
+        id,
+        name,
+        url: `https://kream.co.kr/products/${id}`,
+        image: safeUrl(s?.image) ?? k?.image ?? null,
+        price: k?.price ?? s?.price ?? null,
+        vsRetail: s?.vsRetail ?? (Number.isFinite(k?.premiumPct) ? Math.round(k.premiumPct * 10) / 10 : null),
+        hits: pairs.length,
+        days: new Set(pairs.map((pair) => pair.slice(0, 10))).size,
+        sources: sources.map((source) => SOURCE_LABELS[source] ?? source),
+      });
+    }
+    rows.sort((a, b) => b.hits - a.hits || b.days - a.days || b.sources.length - a.sources.length);
+    windows[days] = rows.slice(0, FREQUENT_LIMIT);
+  }
+  return { updatedAt: now.toISOString(), windows };
+}
+
+/** sibna 오늘의 랭킹 목록을 화면용으로 정리한다. */
+export function buildSibnaRank(sibna) {
+  if (!sibna?.lists) return null;
+  const lists = {};
+  for (const [key, items] of Object.entries(sibna.lists)) {
+    lists[key] = items.map((item) => ({ ...item, url: `https://kream.co.kr/products/${item.id}`, sibnaUrl: `https://sibna.kr/today/kream/${item.id}` }));
+  }
+  return { fetchedAt: sibna.fetchedAt, lists };
+}
+
 function readFile(dir, site) {
   const path = join(dir, `${site}.json`);
   if (!existsSync(path)) return null;
@@ -181,9 +269,13 @@ function readFile(dir, site) {
   }
 }
 
-export function loadTrends(dir) {
+export function loadTrends(dir, { sibna = null, now = new Date() } = {}) {
+  const kreamFile = readFile(dir, 'kream');
+  const kream = buildKreamTrend(kreamFile);
   return {
-    kream: buildKreamTrend(readFile(dir, 'kream')),
+    kream,
     musinsa: buildMusinsaTrend(readFile(dir, 'musinsa')),
+    sibnaRank: buildSibnaRank(sibna),
+    frequent: buildFrequent({ kreamFile, kreamTrend: kream, sibna, now }),
   };
 }

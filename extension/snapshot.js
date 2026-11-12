@@ -43,6 +43,7 @@
   /** 3시간 안에 다시 열면 마지막 기록을 교체해 하루 추세가 짧은 간격에 쏠리지 않게 한다. */
   function mergeSnapshot(previous, site, record, nowIso) {
     const items = (record.items ?? []).map((item) => toItem(site, item)).filter((item) => item.name);
+    const fresh = (record.fresh ?? []).map((item) => toItem(site, item)).filter((item) => item.name);
     const next = { ...previous, site };
 
     if (items.length) {
@@ -52,6 +53,8 @@
       const entry = {
         at: nowIso,
         items: Object.fromEntries(items.map((item) => [item.id, [item.rank, item.trades, item.price]])),
+        // 자주 뜨는 상품을 세려고 뜨는 신상 목록도 시간별로 남긴다.
+        ...(fresh.length >= MIN_ITEMS ? { fresh: fresh.map((item) => item.id) } : {}),
       };
       const history = [...(previous?.history ?? [])];
       const last = history.at(-1);
@@ -59,10 +62,7 @@
       history.push(entry);
       Object.assign(next, { updatedAt: nowIso, items, history: history.slice(-MAX_SNAPSHOTS) });
     }
-    if (record.fresh?.length) {
-      const fresh = record.fresh.map((item) => toItem(site, item)).filter((item) => item.name);
-      if (fresh.length >= MIN_ITEMS) Object.assign(next, { fresh, freshAt: nowIso });
-    }
+    if (fresh.length >= MIN_ITEMS) Object.assign(next, { fresh, freshAt: nowIso });
     if (record.details?.length) next.details = mergeDetails(previous?.details, record.details, nowIso);
     if (!next.updatedAt) throw new Error('올릴 랭킹 기록이 없습니다.');
     return next;

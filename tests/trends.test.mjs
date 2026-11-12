@@ -162,3 +162,59 @@ test('KREAM 소싱: 관심 급증·발매가 대비·뜨는 신상과 알림', (
   assert.equal(alerts.find((x) => x.id.endsWith(':1:wish')).name, '관심 +500 · A');
   assert.deepEqual(kreamAlerts(null), []);
 });
+import { mergeDaily, parseKreamRank } from '../src/sources/sibnaKream.mjs';
+import { buildFrequent } from '../src/trends.mjs';
+
+const card = (id, rank, name, price, vs, label = '대표관측가') => `<a class="km-rank-card" href="https://sibna.kr/today/kream/${id}-Name?from=rank&amp;rank_tab=sales">
+  <span class="km-card-thumb"><span class="km-rank-no">#${rank}</span><img src="https://sibna.kr/today/a/${id}.webp" alt=""></span>
+  <span class="km-card-body"><span class="km-card-name km-marquee"><span class="km-marquee-text">${name}</span></span>
+  <span class="km-card-sub km-marquee"><span class="km-marquee-text">Nike · DD1503-101</span></span>
+  <span class="km-card-market"><span class="km-card-market-item"><span>${label}</span><strong>₩ ${price}</strong></span>
+  <span class="km-card-market-item"><span>활발도</span><strong>매우 높음</strong></span>
+  <span class="km-card-market-item"><span>정가대비</span><strong>${vs}</strong></span></span></span></a>`;
+
+test('sibna 크림 랭킹: 목록별 상품을 읽고 번호를 크림 상품 번호로 쓴다', () => {
+  const html = `<div data-rank-panel="sales">${card(28030, 1, '(W) 나이키 덩크 로우 블랙', '75,000', '-41.9%')}${card(51929, 2, '에어팟 &amp; 맥스', '1,120,000', '+45.6%', '최근거래가')}</div>
+    <div data-rank-panel="new">${card(1181541, 1, '페가수스', '99,000', '-')}</div>`;
+  const lists = parseKreamRank(html);
+  assert.deepEqual(lists.sales.map((i) => [i.id, i.rank, i.price, i.vsRetail, i.brand]), [
+    ['28030', 1, 75000, -41.9, 'Nike'], ['51929', 2, 1120000, 45.6, 'Nike'],
+  ]);
+  assert.equal(lists.sales[1].name, '에어팟 & 맥스');
+  assert.equal(lists.new[0].vsRetail, null);
+});
+
+test('sibna 기록은 하루에 하나씩 최근 8일만 남긴다', () => {
+  let file = null;
+  for (let day = 1; day <= 10; day += 1) {
+    const now = new Date(Date.UTC(2026, 10, day, 3));
+    file = mergeDaily(file, { sales: [{ id: String(day), name: `상품${day}`, rank: 1 }] }, now);
+  }
+  file = mergeDaily(file, { sales: [{ id: '99', name: '같은 날', rank: 1 }] }, new Date(Date.UTC(2026, 10, 10, 5)));
+  assert.equal(file.history.length, 8);
+  assert.deepEqual(file.history.at(-1), { date: '2026-11-10', lists: { sales: ['99'] } });
+  assert.equal(file.products['1'], undefined);
+  assert.equal(file.products['9'].name, '상품9');
+});
+
+test('자주 뜨는 상품: 날짜·목록 조합을 세고 기간별로 나눈다', () => {
+  const sibna = {
+    history: [
+      { date: '2026-11-07', lists: { sales: ['1', '2'] } },
+      { date: '2026-11-12', lists: { sales: ['1'], premium: ['1'] } },
+      { date: '2026-11-13', lists: { sales: ['1', '3'] } },
+    ],
+    products: { 1: { name: '자주', vsRetail: 20 }, 2: { name: '옛날' }, 3: { name: '오늘만' } },
+  };
+  const kreamFile = { history: [
+    { at: '2026-11-13T01:00:00Z', items: { 1: [1, 1, 1] }, fresh: ['3'] },
+    { at: '2026-11-13T05:00:00Z', items: { 1: [1, 1, 1] } },
+  ] };
+  const result = buildFrequent({ kreamFile, sibna, now: new Date('2026-11-13T06:00:00Z') });
+  assert.deepEqual(result.windows[1].map((r) => [r.id, r.hits, r.days]), [['1', 2, 1], ['3', 2, 1]]);
+  assert.deepEqual(result.windows[7].map((r) => [r.id, r.hits, r.days]), [['1', 5, 3], ['3', 2, 1], ['2', 1, 1]]);
+  assert.deepEqual(result.windows[7][0].sources.sort(), ['sibna 거래 활발', 'sibna 프리미엄', '크림 랭킹'].sort());
+  assert.equal(result.windows[3].some((r) => r.id === '2'), false);
+  assert.equal(result.windows[7][0].url, 'https://kream.co.kr/products/1');
+  assert.equal(buildFrequent({ kreamFile: null, sibna: null }), null);
+});
