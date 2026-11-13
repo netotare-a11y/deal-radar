@@ -230,6 +230,31 @@ function collabBlock(collab) {
   });
 }
 
+const SHOP_LEVEL = { buy: ['up', '크림 인기 · 추천'], check: ['', '크림 확인 필요'], unknown: ['mute', '크림 기록 없음'] };
+
+/** 공홈 재입고·새 상품 한 줄. 크림에서 찾은 근거와 공홈·크림 바로가기. */
+function shopRow(item) {
+  const [cls, text] = SHOP_LEVEL[item.verdict?.level ?? 'unknown'];
+  const k = item.verdict?.kream;
+  const price = item.currency === 'KRW' ? won(item.price) : `${item.currency} ${item.price}`;
+  const q = encodeURIComponent(`${item.store} ${item.title}`);
+  const links = [
+    { label: `${item.store} 공홈`, url: item.url, primary: true },
+    k ? { label: '크림 상품', url: k.url } : { label: '크림 검색', url: `https://kream.co.kr/search?keyword=${q}` },
+    { label: '번개장터', url: `https://m.bunjang.co.kr/search/products?q=${q}` },
+  ];
+  return expandable({
+    image: item.image,
+    name: `${item.store} ${item.title}`,
+    sub: `<b class="up">${item.kind === 'restock' ? '재입고' : '새 상품'}</b> · <b class="${cls}">${esc(text)}</b> ·${esc(relativeTime(item.at))} · 사이즈 ${item.sizes.length}/${item.total}개`,
+    right: `<div class="price">${esc(price)}</div>${k && Number.isFinite(k.margin) ? `<div class="sig ${tone(k.margin)}">크림 ${esc(pct(k.margin))}</div>` : ''}`,
+    drawer: `${why(item.verdict?.reasons)}
+      <div class="sizes"><span class="lab">풀린 사이즈</span>${item.sizes.map((size) => `<span class="size">${esc(size)}</span>`).join('')}</div>
+      ${k ? `<p class="note">크림에서 찾은 상품: ${ext(k.url, k.name, '')}</p>` : ''}
+      ${linkGroup('바로가기', links)}`,
+  });
+}
+
 function kreamRow(item) {
   const signal = item.wishDelta > 0 ? `<div class="sig up">관심 +${item.wishDelta.toLocaleString('ko-KR')}</div>`
     : item.isNewRank || item.enteredRanking ? '<div class="sig up">신규</div>'
@@ -303,7 +328,9 @@ function renderToday() {
       { aside: '<a href="#releases">더 보기 →</a>' });
 
   const newsHead = sourcing.newsDate ? `${md(sourcing.newsDate)} sibna 발매뉴스 기준` : '';
-  const right = block('오늘의 알짜 픽', rows(sourcing.news ?? [], newsRow, { empty: '오늘 기사에서 꼭 살 만한 것을 찾지 못했어요.' }), { count: newsHead, aside: goto('추천', '뉴스 픽', '전체') })
+  const shopNow = (sourcing.shop ?? []).filter((e) => Date.now() - Date.parse(e.at) < 24 * 3600 * 1000);
+  const right = (shopNow.length ? block('공홈 재입고', rows(shopNow.slice(0, 4), shopRow, {}), { count: `${shopNow.length}건`, aside: goto('공홈 재입고', '', '전체') }) : '')
+    + block('오늘의 알짜 픽', rows(sourcing.news ?? [], newsRow, { empty: '오늘 기사에서 꼭 살 만한 것을 찾지 못했어요.' }), { count: newsHead, aside: goto('추천', '뉴스 픽', '전체') })
     + block('노려 볼 발매', rows((sourcing.releases ?? []).slice(0, 4), recRow, { empty: '추천할 발매가 아직 없습니다.' }), { aside: goto('추천', '발매 예정', '전체') })
     + block('지금 뜨는 신상', rows((sourcing.products ?? []).slice(0, 4), recRow, { empty: '추천할 신상품이 아직 없습니다.' }), { aside: goto('추천', '신상품', '전체') })
     + block('저단가 회전', rows((sourcing.budget ?? []).slice(0, 3), recRow, { empty: '조건에 맞는 상품이 아직 없습니다.' }), { aside: goto('저단가', '', '전체') })
@@ -314,7 +341,7 @@ function renderToday() {
 
 // ── 소싱 ─────────────────────────────
 
-const SRC_VIEWS = ['추천', '저단가', '자주 뜸', '크림', 'sibna'];
+const SRC_VIEWS = ['추천', '공홈 재입고', '저단가', '자주 뜸', '크림', 'sibna'];
 const KREAM_VIEWS = ['순위 급상승', '관심 급증', '뜨는 신상', '발매가 대비', '거래 급증', '전체 랭킹'];
 const SIBNA_LISTS = { '거래 활발': 'sales', 프리미엄: 'premium', '정가 이하': 'under', 신규: 'new' };
 
@@ -333,6 +360,14 @@ function sourcingBody() {
       <p class="foot">${isRelease
     ? '뜨는 브랜드, 이름이 비슷한 크림 상품의 웃돈, 관심 키워드, 응모 여부로 점수를 매깁니다. 줄을 누르면 발매처와 검색 버튼이 나옵니다.'
     : '크림 뜨는 신상·sibna 신규 중 자주 보이고 웃돈이 붙거나 관심이 느는 상품입니다. 정가보다 10% 넘게 싼 것은 뺍니다.'}</p>`;
+  }
+  if (state.src === '공홈 재입고') {
+    const stores = s.shopStores ?? [];
+    const watching = stores.map((st) => `<details><summary class="more">${esc(st.name)} · 상품 ${st.count}개 중 품절 ${st.soldOut.length}개 (재입고 대기)</summary>
+        <div class="news-list">${st.soldOut.map((p) => `<a href="${esc(p.url)}" target="_blank" rel="noopener noreferrer">${esc(p.title)}</a>`).join('') || '<span class="mute">품절 상품 없음</span>'}</div></details>`).join('');
+    return `${rows(s.shop ?? [], shopRow, { key: 'shop', empty: '최근 3일 동안 재입고·새 상품이 없습니다.' })}
+      ${watching}
+      <p class="foot">공홈을 15분쯤마다 확인해 전부 품절이던 상품이 다시 풀리면 알립니다. 크림 랭킹·뜨는 신상·sibna 목록에서 같은 상품을 찾아 인기와 웃돈을 붙입니다. 감시할 공홈을 늘리려면 주소를 알려 주세요.</p>`;
   }
   if (state.src === '저단가') {
     return `${rows(s.budget ?? [], recRow, { key: 'budget', empty: '조건에 맞는 상품이 아직 없습니다.' })}

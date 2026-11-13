@@ -8,6 +8,7 @@ import { collectSibna } from './sources/sibna.mjs';
 import { collectSibnaKream } from './sources/sibnaKream.mjs';
 import { attachNaverRestock } from './sources/naverRestock.mjs';
 import { collectSibnaNews, pickNews } from './sources/sibnaNews.mjs';
+import { collectShopRestock, kreamVerdict, shopAlerts } from './sources/shopRestock.mjs';
 import { collabInfo } from './collabs.mjs';
 import { kreamAlerts, loadTrends } from './trends.mjs';
 import {
@@ -58,11 +59,12 @@ async function main() {
   const now = new Date();
 
   const previous = await loadPreviousFeed(siteUrl);
-  const [ruliweb, sibna, sibnaKream, sibnaNews] = await Promise.all([
+  const [ruliweb, sibna, sibnaKream, sibnaNews, shop] = await Promise.all([
     runSource('ruliweb', '루리웹 핫딜', () => collectRuliweb(now)),
     runSource('sibna', 'today 발매정보', () => collectSibna(config, now)),
     runSource('sibnaKream', 'today 크림 랭킹', () => collectSibnaKream(previous?.sibnaKream, now)),
     runSource('sibnaNews', 'today 발매뉴스', () => collectSibnaNews(previous?.sibnaNews, now)),
+    runSource('shopRestock', '공홈 재입고', () => collectShopRestock(config.shopRestock?.stores ?? [], previous?.shopRestock, now)),
   ]);
 
   if (!sibna.data && !ruliweb.data && !previous) {
@@ -114,19 +116,26 @@ async function main() {
   for (const items of [sourcing.products, sourcing.budget]) {
     for (const item of items) item.naverRestock = restockTargets.find((t) => t.id === item.id)?.naverRestock ?? [];
   }
+  // 공홈 재입고는 매번 최신 크림 인기 목록으로 다시 판단한다. 실패하면 직전 재고·이벤트를 그대로 둔다.
+  const shopData = shop.data ?? previous?.shopRestock ?? { stock: {}, events: [] };
+  for (const event of shopData.events) event.verdict = kreamVerdict(event, hot, config.shopRestock?.fx);
+  if (shop.data?.errors?.length) shop.status.error = `일부 실패: ${shop.data.errors.join(', ')}`;
+  sourcing.shop = shopData.events;
+  sourcing.shopStores = shopData.stores ?? [];
   trends.sourcing = sourcing;
 
   buildSite({
     siteName: config.siteName,
     generatedAt: now.toISOString(),
     repo: process.env.GITHUB_REPOSITORY ?? '',
-    sources: [ruliweb.status, sibna.status, sibnaKream.status, sibnaNews.status, ...(naverCreds ? [naver.status] : [])],
+    sources: [ruliweb.status, sibna.status, sibnaKream.status, sibnaNews.status, shop.status, ...(naverCreds ? [naver.status] : [])],
     // alert 는 안드로이드 앱이 알림을 띄울지 판단하는 값이다.
     releases: releasesOut,
     // KREAM 소싱 알림은 앱이 이미 읽는 deals 에 실어 보내고, 사이트 핫딜 목록에서는 뺀다.
     deals: [
       ...deals.map((item) => ({ ...item, watched: watched(item), alert: isDealAlertable(item, config) })),
       ...kreamAlerts(trends.kream, config.kreamAlerts),
+      ...shopAlerts(shopData.events, now),
     ],
     news: sibna.data?.news ?? previous?.news ?? [],
     trends,
@@ -136,6 +145,8 @@ async function main() {
     // 발매 글에서 읽은 발매처 링크. 다음 실행 때 같은 글을 다시 요청하지 않게 남긴다.
     storeLinks,
     restockNews,
+    // 공홈별 직전 재고. 다음 실행이 재입고를 찾으려면 꼭 남겨야 한다.
+    shopRestock: { stock: shopData.stock, events: shopData.events, stores: shopData.stores ?? [] },
     shortcuts: config.shortcuts,
     alertPolicy: {
       quietStartHour: config.notify.quietHours.start,

@@ -19,6 +19,12 @@
   },
   "sourcing": { "maxPrice": 60000, "limit": 15 },
   "kreamAlerts": { "wishDelta": 300, "rankRise": 10, "premiumPct": 30, "freshTop": 5 },
+  "shopRestock": {
+    "stores": [
+      { "url": "https://skylrk.com" }
+    ],
+    "fx": { "USD": 1400, "EUR": 1550, "GBP": 1850, "JPY": 9.3, "KRW": 1 }
+  },
   "shortcuts": {
     "musinsa": [
       { "label": "무신사 뉴스·발매 콘텐츠", "url": "https://www.musinsa.com/content/list?tagList=&contentCategoryCode=019003" }
