@@ -12,7 +12,7 @@ import { collectShopRestock, kreamVerdict, shopAlerts } from './sources/shopRest
 import { collabInfo } from './collabs.mjs';
 import { kreamAlerts, loadTrends } from './trends.mjs';
 import {
-  attachRestock, attachStoreLinks, hotProducts, recommendBudget, recommendProducts, recommendReleases,
+  attachRestock, attachStoreLinks, hotProducts, recommendBudget, recommendCollabs, recommendProducts, recommendReleases,
 } from './sourcing.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -84,6 +84,7 @@ async function main() {
     releases: recommendReleases(releasesOut, hot, now),
     products: attachRestock(recommendProducts(hot, now), releasesOut),
     budget: attachRestock(recommendBudget(hot, config.sourcing), releasesOut),
+    collabs: recommendCollabs(hot, releasesOut),
   };
   // sibna 발매뉴스에서 꼭 살 만한 것. 기사는 3시간마다 받고, 고르기는 매번 최신 크림 흐름으로 다시 한다.
   const sibnaNewsData = sibnaNews.data ?? previous?.sibnaNews ?? null;

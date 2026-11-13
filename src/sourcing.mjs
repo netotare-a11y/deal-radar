@@ -1,5 +1,6 @@
 import { decodeEntities, fetchText, kst, safeUrl, sleep, stripTags } from './lib/util.mjs';
 import { sizeAdvice } from './sizes.mjs';
+import { findCollabs } from './collabs.mjs';
 
 // 발매 글은 한글 브랜드명, 크림·sibna 상품은 영문 브랜드명이 섞여 있어 둘을 이어 준다.
 const BRANDS = {
@@ -121,6 +122,80 @@ export function recommendProducts(hot, now = new Date(), limit = 15) {
       return productRec(item, score, reasons);
     })
     .filter((item) => item.score > 0)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, limit);
+}
+
+// 'Asics x Jichoi Hypersync' → 등록 안 된 협업도 x 앞뒤 첫 단어로 묶는다.
+function pairOf(name) {
+  const m = String(name).replace(/^\([^)]*\)\s*/, '').match(/^([A-Za-z가-힣][\w가-힣'.-]*)[^x×]*?\s(?:x|×)\s([A-Za-z가-힣][\w가-힣'.-]+)/i);
+  if (!m) return null;
+  const [a, b] = [m[1], m[2]];
+  return { key: `pair:${[a.toLowerCase(), b.toLowerCase()].sort().join('|')}`, label: `${a} x ${b}` };
+}
+
+/**
+ * 지금 크림·sibna 인기 목록에 뜬 협업 상품을 협업 상대별로 묶어, 많이 뜨고 웃돈이 큰 협업부터 보여 준다.
+ * 같은 협업의 곧 발매 소식이 있으면 함께 붙인다.
+ */
+export function recommendCollabs(hot, releases = [], limit = 12) {
+  const groups = new Map();
+  for (const item of hot) {
+    // 'Supreme x Timberland Polartec'이 세 번 세지지 않게 목록에서 먼저 나오는 협업 하나에만 넣는다.
+    const [c] = findCollabs(item.name);
+    const keys = c
+      ? [{ key: c.key, label: c.label, about: c.about, why: c.why, past: c.past, known: true }]
+      : [pairOf(item.name)].filter(Boolean);
+    for (const k of keys) {
+      const group = groups.get(k.key) ?? { ...k, items: [] };
+      group.items.push(item);
+      groups.set(k.key, group);
+    }
+  }
+  const avg = (list) => (list.length ? list.reduce((sum, i) => sum + i.premium, 0) / list.length : null);
+  const itemScore = (i) => (Number.isFinite(i.premium) ? premiumForScore(i) / 10 : 0) + (i.kreamRank ? 2 : 0) + (i.freshRank ? 2 : 0) + (i.hits ?? 0) / 3;
+  return [...groups.values()].map((g) => {
+    const verified = g.items.filter((i) => i.premiumSource === 'kream' && Number.isFinite(i.premium));
+    const sibna = g.items.filter((i) => i.premiumSource === 'sibna' && Number.isFinite(i.premium));
+    const ranked = g.items.filter((i) => i.kreamRank || i.freshRank);
+    const hits = g.items.reduce((sum, i) => sum + (i.hits ?? 0), 0);
+    const avgKream = avg(verified);
+    const avgSibna = avg(sibna);
+    const upcoming = releases
+      .filter((r) => (g.known ? findCollabs(r.title).some((c) => c.key === g.key) : pairOf(r.title)?.key === g.key))
+      .slice(0, 3)
+      .map((r) => ({ title: r.title, date: r.date, time: r.time, method: r.method, url: r.url }));
+    let score = Math.min(g.items.length, 8) * 1.5 + ranked.length + Math.min(hits, 20) / 4 + (upcoming.length ? 3 : 0);
+    if (avgKream !== null) score += Math.max(-3, Math.min(avgKream / 10, 6));
+    else if (avgSibna !== null) score += Math.max(-2, Math.min(avgSibna, 60) / 20);
+    const reasons = [
+      `크림·sibna 인기 목록에 ${g.items.length}개`,
+      ranked.length ? `${ranked.length}개가 크림 랭킹·뜨는 신상` : '',
+      avgKream !== null ? `크림 발매가 확인 ${verified.length}개 평균 웃돈 ${pct(avgKream)}`
+        : avgSibna !== null ? `sibna 정가 기준 평균 ${pct(avgSibna)}(확인 전)` : '',
+      hits ? `최근 7일 합쳐 ${hits}회 등장` : '',
+      upcoming.length ? `곧 발매 ${upcoming.length}건` : '',
+    ].filter(Boolean);
+    const search = (q) => `https://kream.co.kr/search?keyword=${encodeURIComponent(q)}`;
+    const english = g.label.split(' (')[0];
+    return {
+      key: g.key, label: g.label, known: Boolean(g.known),
+      about: g.about ?? '딜레이더 협업 목록에 없는 협업이에요. 크림 인기 목록에 떠서 자동으로 찾았어요.',
+      why: g.why ?? [],
+      score: Math.round(score * 10) / 10, reasons, upcoming,
+      premium: avgKream ?? avgSibna, premiumSource: avgKream !== null ? 'kream' : avgSibna !== null ? 'sibna' : null,
+      count: g.items.length,
+      image: [...g.items].sort((a, b) => itemScore(b) - itemScore(a))[0]?.image ?? null,
+      items: [...g.items].sort((a, b) => itemScore(b) - itemScore(a)).slice(0, 8).map((i) => ({
+        id: i.id, name: i.name, image: i.image ?? null, price: i.price ?? null,
+        premium: Number.isFinite(i.premium) ? Math.round(i.premium) : null, premiumSource: i.premiumSource ?? null,
+        rank: i.kreamRank ? `랭킹 ${i.kreamRank}위` : i.freshRank ? `뜨는 신상 ${i.freshRank}위` : '',
+      })),
+      links: [{ label: `크림 '${english}' 전체`, url: search(english), primary: true }, ...(g.past ?? []).map((q) => ({ label: q, url: search(q) }))],
+    };
+  })
+    // 등록 안 된 협업은 2개 이상 떴거나 확인된 웃돈이 20% 넘을 때만(Xbox Series X 같은 잡음 거르기).
+    .filter((g) => g.known || g.count >= 2 || (g.premiumSource === 'kream' && g.premium >= 20))
     .sort((a, b) => b.score - a.score)
     .slice(0, limit);
 }

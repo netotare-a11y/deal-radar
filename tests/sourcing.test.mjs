@@ -110,3 +110,24 @@ test('웃돈: 크림 발매가로 확인한 값을 쓰고, sibna 값은 확인 �
   // 933%여도 60%까지만, 그 절반만 반영된다: 1(신규) + 3(60/2/10) = 4
   assert.equal(recs[1].score, 4);
 });
+test('협업 순위: 협업 상대별로 묶고, 한 상품은 한 번만, 등록 안 된 협업도 2개 이상이면 찾는다', async () => {
+  const { recommendCollabs } = await import('../src/sourcing.mjs');
+  const hot = [
+    { id: '1', name: 'Carhartt WIP x Nike Hoodie Black', premium: 20, premiumSource: 'kream', freshRank: 3 },
+    { id: '2', name: 'Nike x Carhartt WIP Air Max Goadome Low', premium: 10, premiumSource: 'kream', kreamRank: 5 },
+    { id: '3', name: 'Supreme x Timberland Polartec Jacket', premium: 120, premiumSource: 'kream' },
+    { id: '4', name: 'Asics x Jichoi Hypersync Black' },
+    { id: '5', name: 'Asics x Jichoi Hypersync White' },
+    { id: '6', name: 'Xbox Series X (220V)' },
+    { id: '7', name: 'Carhartt Knit Hat' },
+  ];
+  const releases = [{ title: '칼하트 WIP x 나이키 2차 발매', date: '2026-11-20', time: '10:00', method: '선착순', url: 'u' }];
+  const out = recommendCollabs(hot, releases);
+  const carhartt = out.find((g) => g.key === 'carhartt');
+  assert.equal(carhartt.count, 2);
+  assert.equal(carhartt.premium, 15);
+  assert.equal(carhartt.upcoming.length, 1);
+  assert.equal(out.filter((g) => g.items.some((i) => i.id === '3')).length, 1, 'Timberland·Polartec 따로 안 셈');
+  assert.ok(out.find((g) => g.label === 'Asics x Jichoi'));
+  assert.ok(!out.some((g) => /xbox/i.test(g.label)));
+});

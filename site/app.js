@@ -230,6 +230,27 @@ function collabBlock(collab) {
   });
 }
 
+/** 협업 상대 하나: 지금 뜬 상품 수·평균 웃돈, 상품별 바로가기, 곧 발매. */
+function collabGroupRow(g, index) {
+  const items = g.items.map((i) => `<a href="https://kream.co.kr/products/${esc(i.id)}" target="_blank" rel="noopener noreferrer">
+      <span class="mute">${esc(won(i.price))}${Number.isFinite(i.premium) ? ` · <b class="${i.premiumSource === 'sibna' ? 'mute' : tone(i.premium)}">${i.premiumSource === 'sibna' ? 'sibna ' : '발매가 '}${esc(pct(i.premium))}</b>` : ''}${i.rank ? ` · ${esc(i.rank)}` : ''}</span> ${esc(i.name)}</a>`).join('');
+  const upcoming = g.upcoming.length
+    ? `<div class="news-list"><span class="lab">곧 발매</span>${g.upcoming.map((r) => `<a href="${esc(r.url)}" target="_blank" rel="noopener noreferrer"><b class="up">${esc(md(r.date))} ${esc(r.time ?? '')}</b> ${esc(r.method ?? '')} · ${esc(r.title)}</a>`).join('')}</div>` : '';
+  return expandable({
+    num: index + 1,
+    image: g.image,
+    name: g.label,
+    sub: `${g.upcoming.length ? '<b class="up">곧 발매</b> · ' : ''}${esc(g.reasons.slice(0, 2).join(' · '))}`,
+    right: `<div class="price">${g.count}개</div>${premTag(g)}`,
+    drawer: `<p class="note">${esc(g.about)}</p>
+      ${g.why.length ? `<ul class="reasons">${g.why.map((w) => `<li>${esc(w)}</li>`).join('')}</ul>` : ''}
+      ${why(g.reasons)}
+      ${upcoming}
+      <div class="news-list"><span class="lab">지금 크림에 뜬 상품</span>${items}</div>
+      ${linkGroup('크림 검색', g.links)}`,
+  });
+}
+
 const SHOP_LEVEL = { buy: ['up', '크림 인기 · 추천'], check: ['', '크림 확인 필요'], unknown: ['mute', '크림 기록 없음'] };
 
 /** 공홈 재입고·새 상품 한 줄. 크림에서 찾은 근거와 공홈·크림 바로가기. */
@@ -331,6 +352,7 @@ function renderToday() {
   const shopNow = (sourcing.shop ?? []).filter((e) => Date.now() - Date.parse(e.at) < 24 * 3600 * 1000);
   const right = (shopNow.length ? block('공홈 재입고', rows(shopNow.slice(0, 4), shopRow, {}), { count: `${shopNow.length}건`, aside: goto('공홈 재입고', '', '전체') }) : '')
     + block('오늘의 알짜 픽', rows(sourcing.news ?? [], newsRow, { empty: '오늘 기사에서 꼭 살 만한 것을 찾지 못했어요.' }), { count: newsHead, aside: goto('추천', '뉴스 픽', '전체') })
+    + block('뜨는 협업', rows((sourcing.collabs ?? []).slice(0, 3), collabGroupRow, { empty: '지금 뜨는 협업 상품이 없습니다.' }), { aside: goto('협업', '', '전체') })
     + block('노려 볼 발매', rows((sourcing.releases ?? []).slice(0, 4), recRow, { empty: '추천할 발매가 아직 없습니다.' }), { aside: goto('추천', '발매 예정', '전체') })
     + block('지금 뜨는 신상', rows((sourcing.products ?? []).slice(0, 4), recRow, { empty: '추천할 신상품이 아직 없습니다.' }), { aside: goto('추천', '신상품', '전체') })
     + block('저단가 회전', rows((sourcing.budget ?? []).slice(0, 3), recRow, { empty: '조건에 맞는 상품이 아직 없습니다.' }), { aside: goto('저단가', '', '전체') })
@@ -341,7 +363,7 @@ function renderToday() {
 
 // ── 소싱 ─────────────────────────────
 
-const SRC_VIEWS = ['추천', '공홈 재입고', '저단가', '자주 뜸', '크림', 'sibna'];
+const SRC_VIEWS = ['추천', '협업', '공홈 재입고', '저단가', '자주 뜸', '크림', 'sibna'];
 const KREAM_VIEWS = ['순위 급상승', '관심 급증', '뜨는 신상', '발매가 대비', '거래 급증', '전체 랭킹'];
 const SIBNA_LISTS = { '거래 활발': 'sales', 프리미엄: 'premium', '정가 이하': 'under', 신규: 'new' };
 
@@ -360,6 +382,10 @@ function sourcingBody() {
       <p class="foot">${isRelease
     ? '뜨는 브랜드, 이름이 비슷한 크림 상품의 웃돈, 관심 키워드, 응모 여부로 점수를 매깁니다. 줄을 누르면 발매처와 검색 버튼이 나옵니다.'
     : '크림 뜨는 신상·sibna 신규 중 자주 보이고 웃돈이 붙거나 관심이 느는 상품입니다. 정가보다 10% 넘게 싼 것은 뺍니다.'}</p>`;
+  }
+  if (state.src === '협업') {
+    return `${rows(s.collabs ?? [], collabGroupRow, { key: 'collabs', empty: '지금 크림에서 뜨는 협업 상품이 없습니다.' })}
+      <p class="foot">크림 랭킹·뜨는 신상·sibna 목록에 뜬 협업 상품을 협업 상대별로 묶었습니다. 많이 뜰수록, 크림 발매가 대비 웃돈이 클수록, 곧 발매가 있을수록 위에 옵니다. 줄을 누르면 상품별 웃돈과 크림 바로가기가 나옵니다.</p>`;
   }
   if (state.src === '공홈 재입고') {
     const stores = s.shopStores ?? [];
