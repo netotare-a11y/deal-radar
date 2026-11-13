@@ -350,15 +350,15 @@ function renderToday() {
 
   const newsHead = sourcing.newsDate ? `${md(sourcing.newsDate)} sibna 발매뉴스 기준` : '';
   const shopNow = (sourcing.shop ?? []).filter((e) => Date.now() - Date.parse(e.at) < 24 * 3600 * 1000);
-  const right = (shopNow.length ? block('공홈 재입고', rows(shopNow.slice(0, 4), shopRow, {}), { count: `${shopNow.length}건`, aside: goto('공홈 재입고', '', '전체') }) : '')
-    + block('오늘의 알짜 픽', rows(sourcing.news ?? [], newsRow, { empty: '오늘 기사에서 꼭 살 만한 것을 찾지 못했어요.' }), { count: newsHead, aside: goto('추천', '뉴스 픽', '전체') })
+  const shopBlock = shopNow.length ? block('공홈 재입고', rows(shopNow.slice(0, 4), shopRow, {}), { count: `${shopNow.length}건`, aside: goto('공홈 재입고', '', '전체') }) : '';
+  const right = block('오늘의 알짜 픽', rows(sourcing.news ?? [], newsRow, { empty: '오늘 기사에서 꼭 살 만한 것을 찾지 못했어요.' }), { count: newsHead, aside: goto('추천', '뉴스 픽', '전체') })
     + block('뜨는 협업', rows((sourcing.collabs ?? []).slice(0, 3), collabGroupRow, { empty: '지금 뜨는 협업 상품이 없습니다.' }), { aside: goto('협업', '', '전체') })
     + block('노려 볼 발매', rows((sourcing.releases ?? []).slice(0, 4), recRow, { empty: '추천할 발매가 아직 없습니다.' }), { aside: goto('추천', '발매 예정', '전체') })
     + block('지금 뜨는 신상', rows((sourcing.products ?? []).slice(0, 4), recRow, { empty: '추천할 신상품이 아직 없습니다.' }), { aside: goto('추천', '신상품', '전체') })
     + block('저단가 회전', rows((sourcing.budget ?? []).slice(0, 3), recRow, { empty: '조건에 맞는 상품이 아직 없습니다.' }), { aside: goto('저단가', '', '전체') })
     + block('인기 핫딜', rows(hot.slice(0, 5), dealRow, { empty: '아직 추천이 쌓인 핫딜이 없습니다.' }), { aside: '<a href="#deals">전체 →</a>' });
 
-  return `${nextBar}<div class="grid2"><div>${left}</div><div>${right}</div></div>`;
+  return `${nextBar}<div class="grid2"><div>${left}${shopBlock}</div><div>${right}</div></div>`;
 }
 
 // ── 소싱 ─────────────────────────────
