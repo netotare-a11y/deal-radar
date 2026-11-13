@@ -62,3 +62,18 @@ test('가게 하나가 실패해도 그 가게 직전 재고를 유지한다', a
   assert.equal(out.events[0].kind, 'restock');
   assert.equal(out.errors.length, 1);
 });
+
+test('발견한 뒤 팔리면 남은 사이즈를 줄이고, 다 팔리거나 목록에서 빠지면 품절로 표시', async () => {
+  const later = new Date('2026-11-13T05:00:00Z');
+  const first = await collectShopRestock([{ url: 'https://skylrk.com' }], { stock: { 'skylrk.com': {} }, events: [] }, now,
+    async () => shop([product('a', 'A', [true, true]), product('b', 'B', [true])]));
+  assert.equal(first.events.length, 2);
+  const second = await collectShopRestock([{ url: 'https://skylrk.com' }], first, later,
+    async () => shop([product('a', 'A', [false, true])]));
+  const a = second.events.find((e) => e.title === 'A');
+  const b = second.events.find((e) => e.title === 'B');
+  assert.deepEqual(a.nowSizes, ['M 9']);
+  assert.equal(a.soldOutAt, undefined);
+  assert.deepEqual(b.nowSizes, []);
+  assert.equal(b.soldOutAt, later.toISOString());
+});

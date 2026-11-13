@@ -256,6 +256,8 @@ const SHOP_LEVEL = { buy: ['up', '크림 인기 · 추천'], check: ['', '크림
 /** 공홈 재입고·새 상품 한 줄. 크림에서 찾은 근거와 공홈·크림 바로가기. */
 function shopRow(item) {
   const [cls, text] = SHOP_LEVEL[item.verdict?.level ?? 'unknown'];
+  const left = item.nowSizes ?? item.sizes;
+  const gone = item.sizes.filter((size) => !left.includes(size));
   const k = item.verdict?.kream;
   const price = item.currency === 'KRW' ? won(item.price) : `${item.currency} ${item.price}`;
   const q = encodeURIComponent(`${item.store} ${item.title}`);
@@ -267,10 +269,12 @@ function shopRow(item) {
   return expandable({
     image: item.image,
     name: `${item.store} ${item.title}`,
-    sub: `<b class="up">${item.kind === 'restock' ? '재입고' : '새 상품'}</b> · <b class="${cls}">${esc(text)}</b> ·${esc(relativeTime(item.at))} · 사이즈 ${item.sizes.length}/${item.total}개`,
+    sub: `<b class="up">${item.kind === 'restock' ? '재입고' : '새 상품'}</b> · <b class="${cls}">${esc(text)}</b> · ${left.length ? `남은 사이즈 ${left.length}/${item.total}` : '<b class="down">지금 품절</b>'} · 발견 ${esc(relativeTime(item.at))}`,
     right: `<div class="price">${esc(price)}</div>${k && Number.isFinite(k.margin) ? `<div class="sig ${tone(k.margin)}">크림 ${esc(pct(k.margin))}</div>` : ''}`,
     drawer: `${why(item.verdict?.reasons)}
-      <div class="sizes"><span class="lab">풀린 사이즈</span>${item.sizes.map((size) => `<span class="size">${esc(size)}</span>`).join('')}</div>
+      ${left.length ? `<div class="sizes"><span class="lab">남은 사이즈</span>${left.map((size) => `<span class="size">${esc(size)}</span>`).join('')}</div>` : ''}
+      ${gone.length ? `<div class="sizes"><span class="lab">그새 팔림</span>${gone.map((size) => `<span class="size mute"><s>${esc(size)}</s></span>`).join('')}</div>` : ''}
+      <p class="mute">공홈 재고는 15분쯤마다 다시 확인합니다${item.checkedAt ? ` (마지막 ${esc(relativeTime(item.checkedAt))})` : ''}. 공홈에서 한국 배송이 막힌 사이즈는 여기서 남아 있어도 품절로 보일 수 있어요.</p>
       ${k ? `<p class="note">크림에서 찾은 상품: ${ext(k.url, k.name, '')}</p>` : ''}
       ${linkGroup('바로가기', links)}`,
   });
@@ -349,7 +353,7 @@ function renderToday() {
       { aside: '<a href="#releases">더 보기 →</a>' });
 
   const newsHead = sourcing.newsDate ? `${md(sourcing.newsDate)} sibna 발매뉴스 기준` : '';
-  const shopNow = (sourcing.shop ?? []).filter((e) => Date.now() - Date.parse(e.at) < 24 * 3600 * 1000);
+  const shopNow = (sourcing.shop ?? []).filter((e) => Date.now() - Date.parse(e.at) < 24 * 3600 * 1000 && (e.nowSizes ?? e.sizes).length);
   const shopBlock = shopNow.length ? block('공홈 재입고', rows(shopNow.slice(0, 4), shopRow, {}), { count: `${shopNow.length}건`, aside: goto('공홈 재입고', '', '전체') }) : '';
   const right = block('오늘의 알짜 픽', rows(sourcing.news ?? [], newsRow, { empty: '오늘 기사에서 꼭 살 만한 것을 찾지 못했어요.' }), { count: newsHead, aside: goto('추천', '뉴스 픽', '전체') })
     + block('뜨는 협업', rows((sourcing.collabs ?? []).slice(0, 3), collabGroupRow, { empty: '지금 뜨는 협업 상품이 없습니다.' }), { aside: goto('협업', '', '전체') })

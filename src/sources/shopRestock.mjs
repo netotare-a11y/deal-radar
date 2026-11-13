@@ -56,6 +56,7 @@ export function findRestocks(before, shop, now) {
       price: Number(avail[0].price),
       currency: shop.currency,
       sizes: avail.map((v) => v.title),
+      nowSizes: avail.map((v) => v.title),
       total: variants.length,
       at: now.toISOString(),
     });
@@ -117,12 +118,22 @@ export async function collectShopRestock(stores, previous = {}, now = new Date()
   const fresh = [];
   const errors = [];
   const summary = [];
+  const cutoff = now.getTime() - KEEP_MS;
+  const kept = (previous.events ?? []).filter((e) => Date.parse(e.at) >= cutoff);
   for (const store of stores) {
     const host = new URL(store.url).host;
     try {
       const shop = await load(store.url);
       fresh.push(...findRestocks(previous.stock?.[host], shop, now));
       stock[host] = stockOf(shop.products);
+      // 발견한 뒤 팔려 나간 것을 반영한다. 목록에서 사라진 상품도 품절로 본다.
+      for (const event of kept.filter((e) => e.storeUrl === shop.origin)) {
+        const p = shop.products.find((item) => `${shop.origin}/products/${item.handle}` === event.url);
+        event.nowSizes = (p?.variants ?? []).filter((v) => v.available).map((v) => v.title);
+        event.checkedAt = now.toISOString();
+        if (!event.nowSizes.length) event.soldOutAt ??= now.toISOString();
+        else delete event.soldOutAt;
+      }
       // shortcut: 가격은 접속한 나라의 통화로 올 수 있다(한국에서 받으면 원화). 깃허브 서버(미국)에서는 상점 통화와 같다고 본다.
       summary.push({
         host, name: shop.name, url: shop.origin, currency: shop.currency, count: shop.products.length,
@@ -137,8 +148,7 @@ export async function collectShopRestock(stores, previous = {}, now = new Date()
     }
   }
   if (errors.length === stores.length && stores.length) throw new Error(errors.join(', '));
-  const cutoff = now.getTime() - KEEP_MS;
-  const events = [...fresh, ...(previous.events ?? []).filter((e) => Date.parse(e.at) >= cutoff)].slice(0, MAX_EVENTS);
+  const events = [...fresh, ...kept].slice(0, MAX_EVENTS);
   return { stock, events, errors, stores: summary };
 }
 
